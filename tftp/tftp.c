@@ -638,8 +638,8 @@ static void printstats(const char *direction, unsigned long amount)
 {
     double delta;
 
-    delta = (tstop.tv_sec + (tstop.tv_usec / 100000.0)) -
-        (tstart.tv_sec + (tstart.tv_usec / 100000.0));
+    delta = (tstop.tv_sec + (tstop.tv_usec / 1000000.0)) -
+        (tstart.tv_sec + (tstart.tv_usec / 1000000.0));
     if (verbose) {
         printf("%s %lu bytes in %.1f seconds", direction, amount, delta);
         printf(" [%.0f bit/s]", (amount * 8.) / delta);
