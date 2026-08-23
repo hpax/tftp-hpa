@@ -759,7 +759,7 @@ char *rewrite_string(const struct formats *pf,
                 goto quit;
             }
 
-            for (next = rules; next; next++) {
+            for (next = rules; next; next = next->next) {
                 if ((next->rule_flags & RULE_LABEL) &&
                     !strcmp(newstr, next->pattern))
                     break;
