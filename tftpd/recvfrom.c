@@ -64,27 +64,22 @@ err:
 static void pmtu_discovery_off(int fd)
 {
 #if defined(IP_MTU_DISCOVER) && defined(IP_PMTUDISC_DONT)
-    int pmtu = IP_PMTUDISC_DONT;
-
-    setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &pmtu, sizeof(pmtu));
+    setsockint(fd, IPPROTO_IP, IP_MTU_DISCOVER, IP_PMTUDISC_DONT);
 #endif
 }
 
 /* Try to enable getting the receive address in recvmsg() */
 static void enable_recvdstaddr(int fd)
 {
-    int on = 1;
-    (void)on;
-
 #ifdef IP_RECVDSTADDR
-    setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &on, sizeof(on));
+    setsockint(fd, IPPROTO_IP, IP_RECVDSTADDR, 1);
 #endif
 #ifdef IP_PKTINFO
-    setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on));
+    setsockint(fd, IPPROTO_IP, IP_PKTINFO, 1);
 #endif
 #ifdef HAVE_IPV6
 #ifdef IPV6_RECVPKTINFO
-    setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on, sizeof(on));
+    setsockint(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, 1);
 #endif
 #endif
 }

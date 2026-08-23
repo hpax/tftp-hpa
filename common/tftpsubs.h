@@ -85,6 +85,15 @@ static inline int sa_set_port(union sock_addr *s, u_short port)
 
 int set_sock_addr(char *, union sock_addr *, char **, bool);
 
+/*
+ * Wrapper for setsockopt() for the case where the option is an int.
+ */
+static inline int setsockint(int sockfd, int level, int optname,
+                             const int optval)
+{
+    return setsockopt(sockfd, level, optname, &optval, sizeof(optval));
+}
+
 struct tftphdr;
 
 struct tftphdr *r_init(void);

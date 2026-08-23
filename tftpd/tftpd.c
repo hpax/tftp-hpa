@@ -766,10 +766,8 @@ int main(int argc, char **argv)
 #ifdef HAVE_IPV6
         if (fd6 >= 0) {
 #if defined(IPV6_V6ONLY)
-            int on = 1;
             if (fd4 >= 0 || force_ipv6)
-                if (setsockopt(fd6, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&on,
-                  sizeof(on)))
+                if (setsockint(fd6, IPPROTO_IPV6, IPV6_V6ONLY, 1))
                     tftpd_log(LOG_ERR, "cannot setsockopt IPV6_V6ONLY %m");
 #endif
             if (bind(fd6, (struct sockaddr *)&bindaddr6,
