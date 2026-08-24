@@ -47,9 +47,6 @@ INSTALL         = @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_DATA    = @INSTALL_DATA@
 
-# Dependency output file pattern
-DEPENDFILE      = $(@D)/.$(@F).d
-
 # Compiler and compiler flags
 CC      = @CC@
 CFLAGS  = @CFLAGS@ -I$(SRCROOT)
@@ -68,5 +65,5 @@ LIBOBJS	= @LIBOBJS@
 TFTPDOBJS = @TFTPDOBJS@
 
 # ar and ranlib (for making libraries)
-AR	= ar cq
+AR	= @AR@ cq
 RANLIB	= @RANLIB@
