@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
         exit(EX_OSERR);
     }
 
-    if (iscmd && pargc) {
+    if (iscmd) {
         /* -c specified; execute command and exit */
         const struct cmd *c;
         const char *errtype;
