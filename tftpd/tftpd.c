@@ -769,7 +769,7 @@ int main(int argc, char **argv)
                     case AF_INET:
                         myaddr.si.sin_addr = sa.si.sin_addr;
                         break;
-#ifdef AF_INET6
+#ifdef HAVE_IPV6
                     case AF_INET6:
                         myaddr.s6.sin6_addr = sa.s6.sin6_addr;
                         break;
@@ -1324,10 +1324,12 @@ static void rewrite_test(FILE *tf)
 {
     static const struct formats test_dummy_format =
         { "dummy", NULL, test_validate_fail, NULL, NULL, 0 };
+#ifdef HAVE_IPV6
     /* Dummy addresses from netblocks assigned for documentation */
     static const char phony_ip6_addr[16] =
         { 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
           0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef };
+#endif
     static const char phony_ip4_addr[4] = { 192, 0, 2, 34 };
     int mode = cancreate ? WRQ : RRQ;
     int af = ai_fam;
@@ -1335,7 +1337,7 @@ static void rewrite_test(FILE *tf)
     memset(&from, 0, sizeof from);
 
     switch (af) {
-#if HAVE_IPV6
+#ifdef HAVE_IPV6
     case AF_INET6:
         memcpy(&from.s6.sin6_addr, phony_ip6_addr, 16);
         break;
