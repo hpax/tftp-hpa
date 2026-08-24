@@ -4,7 +4,7 @@
 ##
 ##   Copyright 2001-2007 H. Peter Anvin - All Rights Reserved
 ##
-## ----------------------------------------------------------------------- 
+## -----------------------------------------------------------------------
 
 ##
 ## MCONFIG.in
@@ -37,7 +37,7 @@ O = @OBJEXT@
 X = @EXEEXT@
 
 # Install into alternate root area, e.g. for package generation
-INSTALLROOT = 
+INSTALLROOT =
 
 # Link
 LN_S            = @LN_S@
@@ -46,6 +46,9 @@ LN_S            = @LN_S@
 INSTALL         = @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_DATA    = @INSTALL_DATA@
+
+# Dependency output file pattern
+DEPENDFILE      = $(@D)/.$(@F).d
 
 # Compiler and compiler flags
 CC      = @CC@

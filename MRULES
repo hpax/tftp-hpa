@@ -2,6 +2,9 @@
 
 .SUFFIXES: .c .cc .o .s .S .i
 
+# Always the default rule, make sure it gets listed first
+all:
+
 .c.o:
 	$(CC) $(CFLAGS) -c $<
 
@@ -20,3 +23,19 @@
 .cc.i:
 	$(CXX) $(CXXFLAGS) -E -o $@ $<
 
+# Common clean patterns
+clean_common:
+	-rm -f *.o *.obj *.dep *.exe *.a *.lib
+
+distclean_common:
+	-rm -f *.bak *~ \#* \.#*
+
+clean: clean_common
+
+distclean: distclean_common
+
+# Dependency output file pattern
+DEPENDFILE = $@.dep
+
+# Include any dependency files
+-include *.dep

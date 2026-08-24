@@ -20,12 +20,6 @@ endif
 
 install:
 
-clean:
-	-rm -f *.a *.o *.obj *.exe
-
-distclean: clean
-	-rm -f *~
-
 libxtra.a: $(LIBOBJS)
 	-rm -f libxtra.a
 	$(AR) libxtra.a $(LIBOBJS)

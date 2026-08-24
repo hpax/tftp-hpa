@@ -28,7 +28,4 @@ install: all
 	cd $(INSTALLROOT)$(MANDIR)/man8 && $(LN_S) -f in.tftpd.8 tftpd.8
 
 clean:
-	rm -f *.o *.obj *.exe tftpd tftpsubs.c tftpsubs.h tftpd.8
-
-distclean: clean
-	rm -f *~
+	rm -f tftpd tftpsubs.c tftpsubs.h tftpd.8

@@ -10,4 +10,4 @@ AC_DEFUN([PA_FIND_FLAGS],
 m4_foreach([_pa_find_flags_flag],[$2],
 [
 AS_IF([test x$_pa_find_flags_done != xyes],
-[PA_ADD_FLAGS([$1],_pa_find_flags_flag,,[_pa_find_flags_done=yes])])])])
+[PA_ADD_FLAGS([$1],m4_quote(_pa_find_flags_flag),,[_pa_find_flags_done=yes])])])])

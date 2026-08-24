@@ -1,9 +1,9 @@
 dnl --------------------------------------------------------------------------
-dnl PA_ADD_FLAGS(variable, flag [,actual_flag [,success [,failure]]]])
+dnl PA_ADD_FLAGS(flagvar, flags [,actual_flags [,success [,failure]]]])
 dnl
-dnl  Add [flags] to the variable [flagvar] if and only if it is accepted
-dnl  by all languages affected by [flagvar], if those languages have
-dnl  been previously seen in the script.
+dnl  Add [flags] or [actual_flags] to the variable [flagvar] if and only
+dnl  if it is accepted by all languages previously seen in the script
+dnl  that are affected by [flagvar].
 dnl --------------------------------------------------------------------------
 AC_DEFUN([PA_ADD_FLAGS],
 [ AS_VAR_PUSHDEF([old],[PA_SHSYM([_$0_$1_orig])])

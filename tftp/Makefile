@@ -27,7 +27,4 @@ install: all
 	$(INSTALL_DATA)    tftp.1   $(INSTALLROOT)$(MANDIR)/man1
 
 clean:
-	rm -f *.o *.obj *.exe tftp tftp.1
-
-distclean: clean
-	rm -f *~
+	rm -f tftp tftp.1

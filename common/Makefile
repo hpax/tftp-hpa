@@ -24,7 +24,4 @@ $(OBJS): tftpsubs.h
 install:
 
 clean:
-	rm -f *.o *.obj *.exe $(LIB)
-
-distclean: clean
-	rm -f *~
+	rm -f $(LIB)

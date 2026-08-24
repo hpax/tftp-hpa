@@ -303,6 +303,7 @@ dnl by -Werror options, so run this *after* those options are added.
 dnl
 PA_CHECK_BAD_STDC_INLINE
 PA_C_TYPEOF
+PA_DEPEND
 
 AC_CONFIG_HEADERS([config/config.h])
 AC_CONFIG_FILES([config/MCONFIG])
