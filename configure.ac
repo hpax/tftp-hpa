@@ -60,19 +60,23 @@ XTRA=false
 
 AC_SEARCH_LIBS([strerror],[cposix])
 
-AC_CHECK_HEADERS_ONCE(inttypes.h)
-AC_CHECK_HEADERS_ONCE(stdint.h)
 AC_CHECK_HEADERS_ONCE(grp.h)
+AC_CHECK_HEADERS_ONCE(inttypes.h)
 AC_CHECK_HEADERS_ONCE(libgen.h)
+AC_CHECK_HEADERS_ONCE(locale.h)
+AC_CHECK_HEADERS_ONCE(paths.h)
+AC_CHECK_HEADERS_ONCE(poll.h)
 AC_CHECK_HEADERS_ONCE(setjmp.h)
+AC_CHECK_HEADERS_ONCE(stdint.h)
+AC_CHECK_HEADERS_ONCE(stdnoreturn.h)
 AC_CHECK_HEADERS_ONCE(strings.h)
 AC_CHECK_HEADERS_ONCE(sysexits.h)
 AC_CHECK_HEADERS_ONCE(unistd.h)
 AC_CHECK_HEADERS_ONCE(sys/filio.h)
+AC_CHECK_HEADERS_ONCE(sys/ioctl.h)
+AC_CHECK_HEADERS_ONCE(sys/select.h)
 AC_CHECK_HEADERS_ONCE(sys/stat.h)
 AC_CHECK_HEADERS_ONCE(sys/time.h)
-AC_CHECK_HEADERS_ONCE(locale.h)
-AC_CHECK_HEADERS_ONCE(stdnoreturn.h)
 PA_CHECK_INTTYPES_H_SANE
 
 dnl This is needed on some versions of FreeBSD...
@@ -109,6 +113,12 @@ AC_CHECK_TYPES(socklen_t)
 AC_SEARCH_LIBS(socket, [socket ws2_32 wsock32], ,
  [AC_MSG_ERROR(socket library not found)])
 
+PA_ARG_DISABLED([poll],
+  [use select() instead of poll(): for debugging only], [],
+  [
+	AC_CHECK_FUNCS(poll)
+	AC_CHECK_FUNCS(ppoll)
+  ])
 AC_CHECK_FUNCS(fcntl)
 AC_CHECK_FUNCS(flock)
 AC_CHECK_FUNCS(setsid)

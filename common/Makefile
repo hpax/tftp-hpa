@@ -9,7 +9,7 @@ VERSION = $(shell cat ../version)
 -include ../config/MCONFIG
 include ../MRULES
 
-OBJS = tftpsubs.$(O) signal.$(O) xalloc.$(O) progname.$(O)
+OBJS = tftpsubs.$(O) signal.$(O) xalloc.$(O) progname.$(O) pollset.$(O)
 LIB  = libcommon.a
 
 all: $(LIB)

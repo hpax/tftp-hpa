@@ -22,7 +22,7 @@ int daemon(int nochdir, int noclose)
     }
 
     if (!noclose) {
-        if ((nullfd = open("/dev/null", O_RDWR)) < 0)
+        if ((nullfd = open(_PATH_DEVNULL, O_RDWR)) < 0)
             return -1;
         if (dup2(nullfd, 0) < 0 ||
             dup2(nullfd, 1) < 0 || dup2(nullfd, 2) < 0) {

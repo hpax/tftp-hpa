@@ -6,6 +6,7 @@
  */
 
 #include "tftpsubs.h"
+#include "pollset.h"
 
 /* Simple minded read-ahead/write-behind subroutines for tftp user and
    server.  Written originally with multiple buffers in mind, but current
@@ -17,8 +18,6 @@
 
 			Jim Guyton 10/85
  */
-
-#include <sys/ioctl.h>
 
 #define PKTSIZE MAX_SEGSIZE+4   /* should be moved to tftp.h */
 
@@ -213,24 +212,17 @@ int synchnet(int f)
     char rbuf[PKTSIZE];
     union sock_addr from;
     socklen_t fromlen;
-    fd_set socketset;
-    struct timeval notime;
+    struct pollset *set = pollset_add(NULL, f);
 
-    while (1) {
-        notime.tv_sec = notime.tv_usec = 0;
-
-        FD_ZERO(&socketset);
-        FD_SET(f, &socketset);
-
-        if (select(f + 1, &socketset, NULL, NULL, &notime) <= 0)
-            break;              /* Nothing to read */
-
+    while (pollset_poll(set, POLLSET_IN, 0) > 0) {
         /* Otherwise drain the packet */
         pktcount++;
         fromlen = sizeof(from);
-        (void)recvfrom(f, rbuf, sizeof(rbuf), 0,
-                       &from.sa, &fromlen);
+        if (recvfrom(f, rbuf, sizeof(rbuf), 0, &from.sa, &fromlen) < 0)
+            break;
     }
+
+    pollset_free(&set);
 
     return pktcount;            /* Return packets drained */
 }

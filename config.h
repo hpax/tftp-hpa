@@ -81,6 +81,20 @@
 #include <fcntl.h>
 #endif
 
+#if !defined(HAVE_POLL) && !defined(HAVE_PPOLL)
+#undef HAVE_POLL_H
+#endif
+
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#elif defined(HAVE_SYS_SELECT_H)
+#include <sys/select.h>
+#endif
+
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
+
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #else
@@ -111,6 +125,18 @@
 #include <getopt.h>
 #else
 #include "lib/getopt.h"
+#endif
+
+#ifdef HAVE_PATHS_H
+#include <paths.h>
+#endif
+
+#ifndef _PATH_DEVNULL
+#if defined(_WIN32) && !defined(__CYGWIN__)
+#define _PATH_DEVNULL "\\\\.\\NUL"
+#else
+#define _PATH_DEVNULL "/dev/null"
+#endif
 #endif
 
 #ifdef HAVE_STDNORETURN_H

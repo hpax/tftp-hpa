@@ -17,15 +17,15 @@
 
 #include "config.h"
 #include <syslog.h>
+#include "common/tftpsubs.h"
+#include "common/pollset.h"
 
 typedef void (*log_func)(int, const char *, ...);
 extern log_func tftpd_log;
 
 void set_signal(int, void (*)(int), int);
-void *xmalloc(size_t);
-char *xstrdup(const char *);
-void *xrealloc(void *, size_t);
-void xfree(void *);
+
+int listen_to(struct pollset *set, const char *name, int ai_fam);
 
 extern int verbosity;
 

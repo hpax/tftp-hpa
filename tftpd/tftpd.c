@@ -17,7 +17,6 @@
  * This version includes many modifications by Jim Guyton <guyton@rand-unix>
  */
 
-#include <sys/ioctl.h>
 #include <signal.h>
 #include <ctype.h>
 #include <pwd.h>
@@ -25,6 +24,7 @@
 #include <syslog.h>
 
 #include "common/tftpsubs.h"
+#include "common/pollset.h"
 #include "recvfrom.h"
 #include "remap.h"
 
@@ -227,29 +227,23 @@ static int lock_file(int fd, int lock_write)
 static int recv_time(int s, void *rbuf, int len, unsigned int flags,
                      unsigned long *timeout_us_p)
 {
-    fd_set fdset;
-    struct timeval tmv, t0, t1;
-    int rv, err;
-    unsigned long timeout_us = *timeout_us_p;
-    unsigned long timeout_left, dt;
+    struct timeval t0, t1;
+    int rv, err = errno;
+    intmax_t timeout_us = *timeout_us_p;
+    intmax_t timeout_left, dt;
+    struct pollset *set = pollset_add(NULL, s);
 
     gettimeofday(&t0, NULL);
     timeout_left = timeout_us;
 
-    for (;;) {
-        FD_ZERO(&fdset);
-        FD_SET(s, &fdset);
-
+    do {
         do {
-            tmv.tv_sec = timeout_left / 1000000;
-            tmv.tv_usec = timeout_left % 1000000;
-
-            rv = select(s + 1, &fdset, NULL, NULL, &tmv);
+            rv = pollset_poll(set, POLLSET_IN, timeout_left);
             err = errno;
 
             gettimeofday(&t1, NULL);
 
-            dt = (t1.tv_sec - t0.tv_sec) * 1000000 +
+            dt = (t1.tv_sec - t0.tv_sec) * (intmax_t)1000000 +
 		 (t1.tv_usec - t0.tv_usec);
             *timeout_us_p = timeout_left =
                 (dt >= timeout_us) ? 1 : (timeout_us - dt);
@@ -257,7 +251,8 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
 
         if (rv == 0) {
             timer(0);           /* Should not return */
-            return -1;
+            rv = -1;
+            break;
         }
 
 #ifdef MSG_DONTWAIT
@@ -269,53 +264,11 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
         err = errno;
         set_socket_nonblock(s, 0);
 #endif
+    } while (rv < 0 && (E_WOULD_BLOCK(err) || err == EINTR));
 
-        if (rv < 0) {
-            if (E_WOULD_BLOCK(err) || err == EINTR) {
-                continue;       /* Once again, with feeling... */
-            } else {
-                errno = err;
-                return rv;
-            }
-        } else {
-            return rv;
-        }
-    }
-}
-
-static int split_port(char **ap, char **pp)
-{
-    char *a, *p;
-    int  ret = AF_UNSPEC;
-
-    a = *ap;
-#ifdef HAVE_IPV6
-    if (is_numeric_ipv6(a)) {
-        if (*a++ != '[')
-            return -1;
-        *ap = a;
-        p = strrchr(a, ']');
-        if (!p)
-            return -1;
-        *p++ = 0;
-        a = p;
-        ret = AF_INET6;
-        p = strrchr(a, ':');
-        if (p)
-            *p++ = 0;
-    } else
-#endif
-    {
-        struct in_addr in;
-
-        p = strrchr(a, ':');
-        if (p)
-            *p++ = 0;
-        if (inet_aton(a, &in))
-            ret = AF_INET;
-    }
-    *pp = p;
-    return ret;
+    pollset_free(&set);
+    errno = err;
+    return rv;
 }
 
 static void tftpd_out_of_memory(void)
@@ -359,33 +312,31 @@ static struct option long_options[] = {
 };
 static const char short_options[] = "46cspvVlLa:B:u:U:r:t:T:R:m:P:";
 
+static struct pollset *listen_set;
+
+static void close_listen_set(void)
+{
+    pollset_close(&listen_set);
+}
+
 int main(int argc, char **argv)
 {
     struct tftphdr *tp;
     struct passwd *pw;
     struct options *opt;
     union sock_addr myaddr;
-    struct sockaddr_in bindaddr4;
-#ifdef HAVE_IPV6
-    struct sockaddr_in6 bindaddr6;
-    int force_ipv6 = 0;
-#endif
     int n;
     int fd = -1;
-    int fd4 = -1;
-    int fd6 = -1;
-    int fdmax = 0;
     int standalone = 0;         /* Standalone (listen) mode */
     int nodaemon = 0;           /* Do not detach process */
-    char *address = NULL;       /* Address to listen to */
     pid_t pid;
     mode_t my_umask = 0;
     int spec_umask = 0;
     int c;
     int setrv;
     int die;
-    int waittime = 900;         /* Default time to wait for a connect */
-    const char *user = "nobody";        /* Default user */
+    intmax_t waittime = 900000000; /* Default us to wait for a connect */
+    const char *user = "nobody";   /* Default user */
     char *ep;
     int use_stderr = 0;
     const char *map_test_file = NULL;
@@ -395,6 +346,7 @@ int main(int argc, char **argv)
     const char *pidfile = NULL;
     u_short tp_opcode;
     bool patherr;
+    pollset_cursor cursor;
 
 #ifdef HAVE_LOCALE_H
     setlocale(LC_CTYPE, "");     /* For to(w)(lower|upper)() */
@@ -406,6 +358,9 @@ int main(int argc, char **argv)
     /* rand() is used for TFTP backoff; it doesn't have to be good */
     srand(time(NULL) ^ getpid());
 
+    listen_set = pollset_new();
+    atexit(close_listen_set);
+
     while ((c = getopt_long(argc, argv, short_options, long_options, NULL))
            != -1)
         switch (c) {
@@ -415,7 +370,6 @@ int main(int argc, char **argv)
 #ifdef HAVE_IPV6
         case '6':
             ai_fam = AF_INET6;
-            force_ipv6 = 1;
             break;
 #endif
         case 'c':
@@ -435,10 +389,11 @@ int main(int argc, char **argv)
             nodaemon = 1;
             break;
         case 'a':
-            address = optarg;
+            standalone = 1;
+            listen_to(listen_set, optarg, ai_fam);
             break;
         case 't':
-            waittime = atoi(optarg);
+            waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
             break;
         case 'B':
             {
@@ -610,185 +565,25 @@ int main(int argc, char **argv)
         pidfile = NULL;
     }
 
-    /* If we're running standalone, set up the input port */
+    /*
+     * If we're running standalone, daemonize the process and add
+     * a pid file if requested.
+     */
     if (standalone) {
         FILE *pf;
-#ifdef HAVE_IPV6
-        if (ai_fam != AF_INET6) {
-#endif
-            fd4 = socket(AF_INET, SOCK_DGRAM, 0);
-            if (fd4 < 0) {
-                tftpd_log(LOG_ERR, "cannot open IPv4 socket: %m");
-                exit(EX_OSERR);
-            }
-            tftpd_config_socket(fd4, 0);
-            memset(&bindaddr4, 0, sizeof bindaddr4);
-            bindaddr4.sin_family = AF_INET;
-            bindaddr4.sin_addr.s_addr = INADDR_ANY;
-            bindaddr4.sin_port = htons(IPPORT_TFTP);
-#ifdef HAVE_IPV6
-        }
-        if (ai_fam != AF_INET) {
-            fd6 = socket(AF_INET6, SOCK_DGRAM, 0);
-            if (fd6 < 0) {
-                if (fd4 < 0) {
-                    tftpd_log(LOG_ERR, "cannot open IPv6 socket: %m");
-                    exit(EX_OSERR);
-                } else {
-                    tftpd_log(LOG_ERR,
-                           "cannot open IPv6 socket, disable IPv6: %m");
-                }
-            }
-            tftpd_config_socket(fd6, 0);
-            memset(&bindaddr6, 0, sizeof bindaddr6);
-            bindaddr6.sin6_family = AF_INET6;
-            bindaddr6.sin6_port = htons(IPPORT_TFTP);
-        }
-#endif
-        if (address) {
-            char *portptr = NULL, *eportptr;
-            int err;
-            struct servent *servent;
-            unsigned long port;
 
-            address = xstrdup(address);
-            err = split_port(&address, &portptr);
-            switch (err) {
-            case AF_INET:
-#ifdef HAVE_IPV6
-                if (fd6 >= 0) {
-                    close(fd6);
-                    fd6 = -1;
-                    if (ai_fam == AF_INET6) {
-                        tftpd_log(LOG_ERR,
-                               "Address %s is not in address family AF_INET6",
-                               address);
-                        exit(EX_USAGE);
-                    }
-                    ai_fam = AF_INET;
-                }
-                break;
-            case AF_INET6:
-                if (fd4 >= 0) {
-                    close(fd4);
-                    fd4 = -1;
-                    if (ai_fam == AF_INET) {
-                        tftpd_log(LOG_ERR,
-                               "Address %s is not in address family AF_INET",
-                               address);
-                        exit(EX_USAGE);
-                    }
-                    ai_fam = AF_INET6;
-                }
-                break;
-#endif
-            case AF_UNSPEC:
-                break;
-            default:
-                tftpd_log(LOG_ERR,
-                       "Numeric IPv6 addresses need to be enclosed in []");
-                exit(EX_USAGE);
-            }
-            if (!portptr)
-                portptr = (char *)"tftp";
-            if (*address) {
-                if (fd4 >= 0) {
-                    bindaddr4.sin_family = AF_INET;
-                    err = set_sock_addr(address, (union sock_addr *)&bindaddr4,
-                                        NULL, true);
-                    if (err) {
-                        tftpd_log(LOG_ERR,
-                               "cannot resolve local IPv4 bind address: %s, %s",
-                               address, gai_strerror(err));
-                        exit(EX_NOINPUT);
-                    }
-                }
-#ifdef HAVE_IPV6
-                if (fd6 >= 0) {
-                    bindaddr6.sin6_family = AF_INET6;
-                    err = set_sock_addr(address, (union sock_addr *)&bindaddr6,
-                                        NULL, true);
-                    if (err) {
-                        if (fd4 >= 0) {
-                            tftpd_log(LOG_ERR,
-                                   "cannot resolve local IPv6 bind address: %s"
-                                   "(%s); using IPv4 only",
-                                   address, gai_strerror(err));
-                            close(fd6);
-                            fd6 = -1;
-                        } else {
-                            tftpd_log(LOG_ERR,
-                                   "cannot resolve local IPv6 bind address: %s"
-                                   "(%s)", address, gai_strerror(err));
-                            exit(EX_NOINPUT);
-                        }
-                    }
-                }
-#endif
-            } else {
-                /* Default to using INADDR_ANY */
-            }
+        if (pollset_isempty(listen_set))
+            listen_to(listen_set, ":tftp", ai_fam);
 
-            if (portptr && *portptr) {
-                servent = getservbyname(portptr, "udp");
-                if (servent) {
-                    if (fd4 >= 0)
-                        bindaddr4.sin_port = servent->s_port;
-#ifdef HAVE_IPV6
-                    if (fd6 >= 0)
-                        bindaddr6.sin6_port = servent->s_port;
-#endif
-                } else if ((port = strtoul(portptr, &eportptr, 0))
-                           && !*eportptr) {
-                    if (fd4 >= 0)
-                        bindaddr4.sin_port = htons(port);
-#ifdef HAVE_IPV6
-                    if (fd6 >= 0)
-                        bindaddr6.sin6_port = htons(port);
-#endif
-                } else if (!strcmp(portptr, "tftp")) {
-                    /* It's TFTP, we're OK */
-                } else {
-                    tftpd_log(LOG_ERR, "cannot resolve local bind port: %s",
-                           portptr);
-                    exit(EX_NOINPUT);
-                }
-            }
+        if (pollset_isempty(listen_set)) {
+            tftpd_log(LOG_ERR, "no listen address available");
+            exit(EX_NOINPUT);
         }
 
-        if (fd4 >= 0) {
-            if (bind(fd4, (struct sockaddr *)&bindaddr4,
-              sizeof(bindaddr4)) < 0) {
-                tftpd_log(LOG_ERR, "cannot bind to local IPv4 socket: %m");
-                exit(EX_OSERR);
-            }
-        }
-#ifdef HAVE_IPV6
-        if (fd6 >= 0) {
-#if defined(IPV6_V6ONLY)
-            if (fd4 >= 0 || force_ipv6)
-                if (setsockint(fd6, IPPROTO_IPV6, IPV6_V6ONLY, 1))
-                    tftpd_log(LOG_ERR, "cannot setsockopt IPV6_V6ONLY %m");
-#endif
-            if (bind(fd6, (struct sockaddr *)&bindaddr6,
-              sizeof(bindaddr6)) < 0) {
-                if (fd4 >= 0) {
-                    tftpd_log(LOG_ERR,
-                           "cannot bind to local IPv6 socket,"
-                           "IPv6 disabled: %m");
-                    close(fd6);
-                    fd6 = -1;
-                } else {
-                    tftpd_log(LOG_ERR, "cannot bind to local IPv6 socket: %m");
-                    exit(EX_OSERR);
-                }
-            }
-        }
-#endif
         /* Daemonize this process */
         /* Note: when running in secure mode (-s), we must not chdir, since
            we are already in the proper directory. */
-        if (!nodaemon && daemon(secure, 0) < 0) {
+        if (!nodaemon && daemon(secure, 1) < 0) {
             tftpd_log(LOG_ERR, "cannot daemonize: %m");
             exit(EX_OSERR);
         }
@@ -806,17 +601,38 @@ int main(int argc, char **argv)
                     tftpd_log(LOG_ERR, "error closing pid file '%s': %m", pidfile);
             }
         }
-        if (fd6 > fd4)
-            fdmax = fd6;
-        else
-            fdmax = fd4;
     } else {
-        /* 0 is our socket descriptor */
+        if (pollset_isempty(listen_set)) {
+            /* inetd mode: 0 is our socket descriptor */
+            fd = dup(0);
+            if (fd < 0) {
+                tftpd_log(LOG_ERR, "dup failed: %s", strerror(errno));
+                exit(EX_OSERR);
+            }
+            pollset_add(listen_set, fd);
+        }
+    }
+
+    fd = open(_PATH_DEVNULL, O_RDWR);
+    if (fd < 0) {
+        tftpd_log(LOG_ERR, "opening %s failed: %s",
+                  _PATH_DEVNULL, strerror(errno));
+        close(0);
         close(1);
-        close(2);
-        fd = 0;
-        fdmax = 0;
+        if (!use_stderr)
+            close(2);
+    } else {
+        dup2(fd, 0);
+        dup2(fd, 1);
+        if (!use_stderr)
+            dup2(fd, 2);
+        close(fd);
+    }
+
+    cursor = 0;
+    while ((fd = pollset_next(listen_set, &cursor, NULL)) >= 0) {
         tftpd_config_socket(fd, 0);
+        cygwin_set_socket_nonblock(fd, 0);
     }
 
     /* This means we don't want to wait() for children */
@@ -835,8 +651,7 @@ int main(int argc, char **argv)
         umask(my_umask);
 
     while (1) {
-        fd_set readset;
-        struct timeval tv_waittime;
+        int what;
         int rv;
 
         if (exit_signal) { /* happens in standalone mode only */
@@ -863,49 +678,30 @@ int main(int argc, char **argv)
             }
         }
 
-        FD_ZERO(&readset);
-        if (standalone) {
-            if (fd4 >= 0) {
-                FD_SET(fd4, &readset);
-                cygwin_set_socket_nonblock(fd4, 0);
-            }
-            if (fd6 >= 0) {
-                FD_SET(fd6, &readset);
-                cygwin_set_socket_nonblock(fd6, 0);
-            }
-        } else { /* fd always 0 */
-            fd = 0;
-            FD_SET(fd, &readset);
-            cygwin_set_socket_nonblock(fd, 0);
-        }
-        tv_waittime.tv_sec = waittime;
-        tv_waittime.tv_usec = 0;
-
-
         /* Never time out if we're in standalone mode */
-        rv = select(fdmax + 1, &readset, NULL, NULL,
-                    standalone ? NULL : &tv_waittime);
+        if (standalone)
+            waittime = -1;
+
+        rv = pollset_poll(listen_set, POLLSET_IN, waittime);
         if (rv == -1 && errno == EINTR)
             continue;           /* Signal caught, reloop */
 
         if (rv == -1) {
-            tftpd_log(LOG_ERR, "select loop: %m");
+            tftpd_log(LOG_ERR, "listen loop: %m");
             exit(EX_IOERR);
         } else if (rv == 0) {
             exit(0);            /* Timeout, return to inetd */
         }
 
-        if (standalone) {
-            if ((fd4 >= 0) && FD_ISSET(fd4, &readset))
-                fd = fd4;
-            else if ((fd6 >= 0) && FD_ISSET(fd6, &readset))
-                fd = fd6;
-            else /* not in set ??? */
-                continue;
-        }
+        cursor = 0;
+        what = POLLSET_IN;
+        fd = pollset_next(listen_set, &cursor, &what);
+        if (fd <= 0)
+            continue;
 
         cygwin_set_socket_nonblock(fd, 1);
         n = myrecvfrom(fd, buf, sizeof(buf), 0, &from, &myaddr);
+        cygwin_set_socket_nonblock(fd, 0);
 
         if (n < 0) {
             if (E_WOULD_BLOCK(errno) || errno == EINTR) {
@@ -929,19 +725,33 @@ int main(int argc, char **argv)
         }
 
         if (standalone) {
-            if ((from.sa.sa_family == AF_INET) &&
-              (myaddr.si.sin_addr.s_addr == INADDR_ANY)) {
+            union sock_addr sa;
+            socklen_t len = sizeof sa;
+            if (((from.sa.sa_family == AF_INET) &&
+                 (myaddr.si.sin_addr.s_addr == INADDR_ANY))
+#ifdef HAVE_IPV6
+                || ((from.sa.sa_family == AF_INET6) &&
+                    IN6_IS_ADDR_UNSPECIFIED(&from.s6.sin6_addr))
+#endif
+                ) {
                 /* myrecvfrom() didn't capture the source address; but we might
                    have bound to a specific address, if so we should use it */
-                memcpy(SOCKADDR_P(&myaddr), &bindaddr4.sin_addr,
-                       sizeof(bindaddr4.sin_addr));
-#ifdef HAVE_IPV6
-            } else if ((from.sa.sa_family == AF_INET6) &&
-		       IN6_IS_ADDR_UNSPECIFIED((struct in6_addr *)
-					       SOCKADDR_P(&myaddr))) {
-		memcpy(SOCKADDR_P(&myaddr), &bindaddr6.sin6_addr,
-		       sizeof(bindaddr6.sin6_addr));
+
+                if (!getsockname(fd, &sa.sa, &len) &&
+                    sa.sa.sa_family == from.sa.sa_family) {
+                    switch (sa.sa.sa_family) {
+                    case AF_INET:
+                        myaddr.si.sin_addr = sa.si.sin_addr;
+                        break;
+#ifdef AF_INET6
+                    case AF_INET6:
+                        myaddr.s6.sin6_addr = sa.s6.sin6_addr;
+                        break;
 #endif
+                    default:
+                        break;
+                    }
+                }
             }
         }
 
