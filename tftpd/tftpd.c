@@ -290,6 +290,7 @@ static struct option long_options[] = {
     { "ipv6",        0, NULL, '6' },
     { "create",      0, NULL, 'c' },
     { "secure",      0, NULL, 's' },
+    { "chroot",      0, NULL, 's' },
     { "permissive",  0, NULL, 'p' },
     { "verbose",     0, NULL, 'v' },
     { "verbosity",   1, NULL, OPT_VERBOSITY },
@@ -304,6 +305,9 @@ static struct option long_options[] = {
     { "timeout",     1, NULL, 't' },
     { "retransmit",  1, NULL, 'T' },
     { "port-range",  1, NULL, 'R' },
+    { "ports",       1, NULL, 'R' },
+    { "service",     1, NULL, 'S' },
+    { "port",        1, NULL, 'S' },
     { "map-file",    1, NULL, 'm' },
     { "map-steps",   1, NULL, OPT_MAP_STEPS },
     { "pidfile",     1, NULL, 'P' },
@@ -311,7 +315,7 @@ static struct option long_options[] = {
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { NULL, 0, NULL, 0 }
 };
-static const char short_options[] = "46cspvVlLa:B:u:U:r:t:T:R:m:P:";
+static const char short_options[] = "46cspvVlLa:B:u:U:r:t:T:R:S:m:P:";
 
 static struct pollset *listen_set;
 
@@ -411,6 +415,13 @@ int main(int argc, char **argv)
             break;
         case 't':
             waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
+            break;
+        case 'S':
+            if (!optarg || !*optarg) {
+                tftpd_log(LOG_ERR, "Missing service name");
+                exit(EX_USAGE);
+            }
+            default_service = optarg;
             break;
         case 'B':
             {
@@ -591,7 +602,7 @@ int main(int argc, char **argv)
         FILE *pf;
 
         if (strlist_isempty(&listen_addrs))
-            strlist_add(&listen_addrs, ":tftp");
+            strlist_add(&listen_addrs, ":");
 
         for (ls = listen_addrs.list; ls; ls = ls->next)
             listen_to(listen_set, ls->str, ai_fam);

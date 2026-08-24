@@ -25,6 +25,8 @@
 #define ADDRLEN INET_ADDRSTRLEN
 #endif
 
+const char *default_service = "tftp";
+
 static const char *famname(int ai_fam)
 {
     switch (ai_fam) {
@@ -106,7 +108,7 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
         hostname = NULL;
 
     if (!service)
-        service = "tftp";
+        service = default_service;
 
     err = getaddrinfo(hostname, service, &hints, &addrs);
     if (err) {
