@@ -95,7 +95,7 @@ void setliteral(int, char **);
 static void command(void);
 
 static void getusage(char *);
-static void makeargv(char *, char **, int *);
+static int makeargv(char *, char **);
 static void putusage(char *);
 static void settftpmode(const struct modes *);
 
@@ -307,15 +307,15 @@ int main(int argc, char *argv[])
         const char *errtype;
         static char *splitbuf = NULL;
 
-        if (!pargc || !pargv[0] || !*pargv[0]) {
-            fprintf(stderr, "%s: missing command after -c\n", _progname);
-            exit(EX_USAGE);
-        }
-
         if (pargc == 1) {
             /* Only one string, see if it should be split */
             splitbuf = xstrdup(pargv[0]);
-            makeargv(splitbuf, pargv = margv, &pargc);
+            pargc = makeargv(splitbuf, pargv = margv);
+        }
+
+        if (!pargc || !pargv[0] || !*pargv[0]) {
+            fprintf(stderr, "%s: missing command after -c\n", _progname);
+            exit(EX_USAGE);
         }
 
         c = getcmd(pargv[0], &errtype);
@@ -391,7 +391,7 @@ void setpeer(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("connect ", "(to) ");
-        makeargv(line, margv, &margc);
+        margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
@@ -525,7 +525,7 @@ void put(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("send ", "(file) ");
-        makeargv(line, margv, &margc);
+        margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
@@ -614,7 +614,7 @@ void get(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("get ", "(files) ");
-        makeargv(line, margv, &margc);
+        margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
@@ -693,8 +693,7 @@ void setrexmt(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("rexmt-timeout ", "(value) ");
-        makeargv(line, margv, &margc);
-        argc = margc;
+        argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
@@ -716,8 +715,7 @@ void settimeout(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("maximum-timeout ", "(value) ");
-        makeargv(line, margv, &margc);
-        argc = margc;
+        argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
@@ -812,7 +810,7 @@ static void command(void)
         add_history(line);
 #endif
 #endif
-        makeargv(line, margv, &margc);
+        margc = makeargv(line, margv);
         if (margc == 0)
             continue;
 
@@ -868,10 +866,11 @@ static const struct cmd *getcmd(const char *name, const char **errtype)
  *
  * XXX: handle quotes and escapes!
  */
-static void makeargv(char *str, char **argp, int *argcp)
+static int makeargv(char *str, char **argp)
 {
     char *cp;
     char ** const argpend = &argp[MARGVSIZE - 1];
+    int argc = 0;
 
     margc = 0;
     for (cp = str; *cp;) {
@@ -882,7 +881,7 @@ static void makeargv(char *str, char **argp, int *argcp)
         if (argp >= argpend)
             break;
         *argp++ = cp;
-        (*argcp)++;
+        argc++;
         while (*cp != '\0' && !isspace(*cp))
             cp++;
         if (*cp == '\0')
@@ -890,6 +889,7 @@ static void makeargv(char *str, char **argp, int *argcp)
         *cp++ = '\0';
     }
     *argp++ = 0;
+    return argc;
 }
 
 void quit(int argc, char *argv[])
