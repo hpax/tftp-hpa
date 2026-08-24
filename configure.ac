@@ -277,6 +277,11 @@ AC_PROG_INSTALL
    INSTALL='\${SRCROOT}'/"$INSTALL"
 fi]
 
+dnl Support for function garbage collection, LTO, and sanitizers
+PA_OPTION_LTO
+PA_OPTION_GC
+PA_OPTION_SANITIZER
+
 PA_ARG_ENABLED([werror],
  [compile with -Werror to error out on any warning],
  [PA_ADD_CFLAGS([-Werror])])
