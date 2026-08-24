@@ -5,7 +5,7 @@
 .\" Copyright (c) 1990, 1993, 1994
 .\"     The Regents of the University of California.  All rights reserved.
 .\"
-.\" Copyright 2001-2009 H. Peter Anvin - All Rights Reserved
+.\" Copyright 2001-2009, 2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
 .TH TFTPD 8 "7 June 2014" "tftp-hpa @@VERSION@@" "System Manager's Manual"
@@ -57,15 +57,37 @@ to listen to when called with the
 .B \-\-listen
 or
 .B \-\-foreground
-option.  The default is to listen to the
-.I tftp
-port specified in
-.I /etc/services
-on all local addresses.
-
-.B Please note:
-Numeric IPv6 adresses must be enclosed in square brackets
-to avoid ambiguity with the optional port information.
+option. Numeric IPv6 adresses must be enclosed in square brackets
+to avoid ambiguity with the optional
+.I port
+information.
+.IP
+If no
+.I address
+is specified, the default is to listen to all local addresses.
+.IP
+.I port
+can be either a decimal number or a service name specified in the
+.MR services 5
+database. If no
+.I port
+is specified, the default is the port given by the "tftp"
+service name, unless overridden by the
+.B \-\-service
+option.
+.IP
+The
+.B \-\-address
+option may be specified multiple times, and if the
+.I address
+is a host name that resolves to multiple addresses,
+.B tftpd
+will bind to all of them.
+.TP
+\fB\-\-service\fP \fIport\fP, \fB\-\-port\fP \fIport\fP, \fB\-S\fP \fIport\fP
+Specify the port/service name to use for addresses where no
+.I port
+is specified. The default is "tftp".
 .TP
 \fB\-\-create\fP, \fB\-c\fP
 Allow new files to be created.  By default,
@@ -80,7 +102,8 @@ options are specified.
 .TP
 \fB\-\-secure\fP, \fB\-s\fP
 Change root directory on startup using
-.BR chroot (2).  This means the remote host does not
+.MR chroot 2 .
+This means the remote host does not
 need to pass along the directory as part of the transfer, and may add
 security.  When
 .B \-\-secure
@@ -151,6 +174,24 @@ to verify whether or not it is available.
 \fB\-\-map-steps\fP \fIsteps\fP
 Specify the number of remapping rules that may be executed before the
 filename mapping fails.  The default is 4096.
+.TP
+\fB\-\-map-test\fP \fIinputfile\fP
+Read the lines in the file \fIinputfile\fP and process each of them as
+if they were a file name received from a client. Each valid
+rewritten filename is then written to standard output, and
+.B tftpd terminates.
+.IP
+Implies
+.BR "\-\-stderr \-\-foreground" .
+.IP
+Use the
+.B \-\-ipv4
+and
+.B \-\-ipv6
+options to simulate an IPv4 or IPv6 client. If
+.B \-\-create
+is included on the command line, simulate a PUT (WRQ) request,
+otherwise simulate a GET (RRQ) request.
 .TP
 \fB\-\-verbose\fP, \fB\-v\fP
 Increase the logging verbosity of
@@ -237,10 +278,10 @@ contains either a label, preceeded by a colon:
 .PP
 or an
 .IR operation ,
-specified below, followed by a
+specified below, followed by an extended regular expression
 .I regex
-(an extended regular expression in the style of
-.MR egrep 1 ),
+(see
+.MR regex 7 ),
 and optionally a
 .IR "replacement pattern" .
 The operation indicated by
@@ -355,7 +396,9 @@ The entire string matched by the
 .TP
 \fB\\1\fP to \fB\\9\fP
 The strings matched by each of the first nine parenthesized
-subexpressions, \\( ... \\), of the
+subexpressions,
+.BR ( ... ) ,
+of the
 .I regex
 pattern.
 .TP
@@ -428,7 +471,7 @@ Access to files is restricted by the list of directories passed to
 on the command line. Alternatively, the
 .B \-\-secure
 flag is used to set up a
-.BR chroot (2)
+.MR chroot 2
 environment for the server to run in once a connection has been set up.
 .PP
 The filename mapping facility
@@ -504,9 +547,9 @@ but has substantially diverged from, an OpenBSD source base, with
 added patches by Markus Gutschke and Gero Kulhman.
 .SH "SEE ALSO"
 .MR tftp 1 ,
-.MR egrep 1 ,
 .MR chroot 2 ,
 .MR umask 2 ,
 .MR hosts_access 5 ,
+.MR services 5 ,
 .MR regex 7 ,
 .MR inetd 8 .
