@@ -85,7 +85,7 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
         if (*np == ':')
             service = np+1;
     } else if (*np == '*' || *np == ':') {
-        hostname = NULL;
+        hostname = "";
         if (*np == '*')
             np++;
         if (*np == ':')
