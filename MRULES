@@ -28,7 +28,7 @@ clean_common:
 	-rm -f *.o *.obj *.dep *.exe *.a *.lib
 
 distclean_common: clean
-	-rm -f *.bak *~ \#* \.#*
+	-rm -f *.bak *~ \#* \.#* *.orig *.rej
 
 clean: clean_common
 

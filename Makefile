@@ -35,9 +35,8 @@ localclean:
 distclean: localdistclean $(patsubst %, %.distclean, $(SUB))
 
 localdistclean: localclean
-	rm -f config/config/MCONFIG config.status config.log config/config.h *~ \#*
+	rm -f config/MCONFIG config.status config.log config/config.h
 	rm -rf *.cache
-	find . -type f \( -name \*.orig -o -name \*.rej \) | xargs rm -f
 
 spotless: distclean
 	rm -f configure config/config.h.in tftp.spec
