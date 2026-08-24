@@ -112,7 +112,8 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
     if (err) {
         tftpd_log(LOG_ERR,
                   "cannot resolve local %sbind address: %s:%s (%s)",
-                  famname(ai_fam), hostname, service, gai_strerror(err));
+                  famname(ai_fam), hostname ? hostname : "*",
+                  service, gai_strerror(err));
         err = ENOENT;
         goto fail;
     }
