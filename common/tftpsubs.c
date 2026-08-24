@@ -376,3 +376,41 @@ char *strip_address(char *addr)
     return addr;
 }
 #endif
+
+/*
+ * Get a descriptor to /dev/null. If none is available, open one.
+ * If the descriptor comes back as < 3, do it again (backfill closed
+ * standard file descriptors.)
+ */
+static int nullfd = -2;
+static void close_nullfd(void)
+{
+    if (nullfd >= 0)
+        close(nullfd);
+}
+
+int get_nullfd(void)
+{
+    if (nullfd > -1)
+        return nullfd;
+
+    while (nullfd < 3) {
+        nullfd = open(_PATH_DEVNULL, O_RDWR);
+        if (nullfd < 0)
+            return nullfd;
+    }
+
+    atexit(close_nullfd);
+
+#ifdef FD_CLOEXEC
+    {
+        int flags = fcntl(nullfd, F_GETFL, 0);
+        if (flags >= 0) {
+            flags |= FD_CLOEXEC;
+            fcntl(nullfd, F_SETFL, flags);
+        }
+    }
+#endif
+
+    return nullfd;
+}

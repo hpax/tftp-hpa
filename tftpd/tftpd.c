@@ -10,6 +10,7 @@
 #include "config.h"             /* Must be included first */
 #include "tftpd.h"
 #include "path.h"
+#include "strlist.h"
 
 /*
  * Trivial file transfer protocol server.
@@ -316,7 +317,8 @@ static struct pollset *listen_set;
 
 static void close_listen_set(void)
 {
-    pollset_close(&listen_set);
+    if (listen_set)
+        pollset_close(&listen_set);
 }
 
 int main(int argc, char **argv)
@@ -347,6 +349,8 @@ int main(int argc, char **argv)
     u_short tp_opcode;
     bool patherr;
     pollset_cursor cursor;
+    struct strlist listen_addrs;
+    int nullfd;
 
 #ifdef HAVE_LOCALE_H
     setlocale(LC_CTYPE, "");     /* For to(w)(lower|upper)() */
@@ -360,6 +364,19 @@ int main(int argc, char **argv)
 
     listen_set = pollset_new();
     atexit(close_listen_set);
+
+    strlist_init(&listen_addrs);
+
+    /*
+     * This creates a /dev/null file descriptor, and backfills any
+     * standard file descriptors left unopened with that descriptor.
+     */
+    nullfd = get_nullfd();
+    if (nullfd < 0) {
+        tftpd_log(LOG_ERR, "opening %s failed: %s",
+                  _PATH_DEVNULL, strerror(errno));
+        exit(EX_OSFILE);
+    }
 
     while ((c = getopt_long(argc, argv, short_options, long_options, NULL))
            != -1)
@@ -390,7 +407,7 @@ int main(int argc, char **argv)
             break;
         case 'a':
             standalone = 1;
-            listen_to(listen_set, optarg, ai_fam);
+            strlist_add(&listen_addrs, optarg);
             break;
         case 't':
             waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
@@ -565,18 +582,29 @@ int main(int argc, char **argv)
         pidfile = NULL;
     }
 
+    dup2(nullfd, 0);
+    dup2(nullfd, 1);
+    if (!use_stderr)
+        dup2(nullfd, 2);
+
     /*
-     * If we're running standalone, daemonize the process and add
-     * a pid file if requested.
+     * If we're running standalone, open the listening sockets,
+     * daemonize the process and add a pid file if requested.
      */
     if (standalone) {
+        struct liststr *ls;
         FILE *pf;
 
-        if (pollset_isempty(listen_set))
-            listen_to(listen_set, ":tftp", ai_fam);
+        if (strlist_isempty(&listen_addrs))
+            strlist_add(&listen_addrs, ":tftp");
+
+        for (ls = listen_addrs.list; ls; ls = ls->next)
+            listen_to(listen_set, ls->str, ai_fam);
+
+        strlist_free(&listen_addrs);
 
         if (pollset_isempty(listen_set)) {
-            tftpd_log(LOG_ERR, "no listen address available");
+            tftpd_log(LOG_ERR, "no listen addresses available");
             exit(EX_NOINPUT);
         }
 
@@ -603,7 +631,10 @@ int main(int argc, char **argv)
         }
     } else {
         if (pollset_isempty(listen_set)) {
-            /* inetd mode: 0 is our socket descriptor */
+            /*
+             * inetd mode: 0 is our socket descriptor. dup() it so it is
+             * not one of the special descriptor numbers.
+             */
             fd = dup(0);
             if (fd < 0) {
                 tftpd_log(LOG_ERR, "dup failed: %s", strerror(errno));
@@ -611,22 +642,6 @@ int main(int argc, char **argv)
             }
             pollset_add(listen_set, fd);
         }
-    }
-
-    fd = open(_PATH_DEVNULL, O_RDWR);
-    if (fd < 0) {
-        tftpd_log(LOG_ERR, "opening %s failed: %s",
-                  _PATH_DEVNULL, strerror(errno));
-        close(0);
-        close(1);
-        if (!use_stderr)
-            close(2);
-    } else {
-        dup2(fd, 0);
-        dup2(fd, 1);
-        if (!use_stderr)
-            dup2(fd, 2);
-        close(fd);
     }
 
     cursor = 0;
@@ -806,7 +821,7 @@ int main(int argc, char **argv)
 #endif
 
     /* Close file descriptors we don't need */
-    close(fd);
+    close_listen_set();
 
     /* Get a socket.  This has to be done before the chroot(), since
        some systems require access to /dev to create a socket. */

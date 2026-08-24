@@ -112,4 +112,6 @@ extern int segsize;
 int pick_port_bind(int sockfd, union sock_addr *myaddr,
                    unsigned int from, unsigned int to);
 
+int get_nullfd(void);
+
 #endif
