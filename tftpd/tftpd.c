@@ -582,11 +582,6 @@ int main(int argc, char **argv)
         pidfile = NULL;
     }
 
-    dup2(nullfd, 0);
-    dup2(nullfd, 1);
-    if (!use_stderr)
-        dup2(nullfd, 2);
-
     /*
      * If we're running standalone, open the listening sockets,
      * daemonize the process and add a pid file if requested.
@@ -643,6 +638,11 @@ int main(int argc, char **argv)
             pollset_add(listen_set, fd);
         }
     }
+
+    dup2(nullfd, 0);
+    dup2(nullfd, 1);
+    if (!use_stderr)
+        dup2(nullfd, 2);
 
     cursor = 0;
     while ((fd = pollset_next(listen_set, &cursor, NULL)) >= 0) {
