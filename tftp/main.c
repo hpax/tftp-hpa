@@ -162,10 +162,11 @@ char *tail(char *);
 static void usage(int errcode)
 {
     fprintf(stderr,
+            "Usage: %s -[vl%s][-m mode] [host [port]] [-c command...]\n",
 #ifdef HAVE_IPV6
-            "Usage: %s [-4][-6][-v][-l][-m mode] [host [port]] [-c command]\n",
+            "46",
 #else
-            "Usage: %s [-v][-l][-m mode] [host [port]] [-c command]\n",
+            "4",
 #endif
             _progname);
     exit(errcode);
@@ -306,8 +307,10 @@ int main(int argc, char *argv[])
         const char *errtype;
         static char *splitbuf = NULL;
 
-        if (sigsetjmp(toplevel, 1) != 0)
-            exit(EX_UNAVAILABLE);
+        if (!pargc || !pargv[0] || !*pargv[0]) {
+            fprintf(stderr, "%s: missing command after -c\n", _progname);
+            exit(EX_USAGE);
+        }
 
         if (pargc == 1) {
             /* Only one string, see if it should be split */
@@ -321,6 +324,10 @@ int main(int argc, char *argv[])
                     _progname, errtype, pargv[0]);
             exit(EX_USAGE);
         }
+
+        if (sigsetjmp(toplevel, 1) != 0)
+            exit(EX_UNAVAILABLE);
+
         (*c->handler) (pargc, pargv);
         xfree(splitbuf);
         exit(0);
