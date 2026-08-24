@@ -95,7 +95,7 @@ void setliteral(int, char **);
 static void command(void);
 
 static void getusage(char *);
-static void makeargv(void);
+static void makeargv(char *, char **, int *);
 static void putusage(char *);
 static void settftpmode(const struct modes *);
 
@@ -107,7 +107,7 @@ struct cmd {
     void (*handler) (int, char **);
 };
 
-struct cmd cmdtab[] = {
+static const struct cmd cmdtab[] = {
     {"connect",
      "connect to remote tftp",
      setpeer},
@@ -156,10 +156,8 @@ struct cmd cmdtab[] = {
     {0, 0, 0}
 };
 
-struct cmd *getcmd(char *);
+static const struct cmd *getcmd(const char *, const char **errtype);
 char *tail(char *);
-
-char *xstrdup(const char *);
 
 static void usage(int errcode)
 {
@@ -179,7 +177,7 @@ int main(int argc, char *argv[])
     int arg;
     static int pargc, peerargc;
     static int iscmd = 0;
-    char **pargv;
+    static char **pargv;
     const char *optx;
     char *peerargv[3];
 
@@ -304,18 +302,27 @@ int main(int argc, char *argv[])
 
     if (iscmd && pargc) {
         /* -c specified; execute command and exit */
-        struct cmd *c;
+        const struct cmd *c;
+        const char *errtype;
+        static char *splitbuf = NULL;
 
         if (sigsetjmp(toplevel, 1) != 0)
             exit(EX_UNAVAILABLE);
 
-        c = getcmd(pargv[0]);
-        if (c == (struct cmd *)-1 || c == (struct cmd *)0) {
-            fprintf(stderr, "%s: invalid command: %s\n", argv[0],
-                    pargv[1]);
+        if (pargc == 1) {
+            /* Only one string, see if it should be split */
+            splitbuf = xstrdup(pargv[0]);
+            makeargv(splitbuf, pargv = margv, &pargc);
+        }
+
+        c = getcmd(pargv[0], &errtype);
+        if (!c) {
+            fprintf(stderr, "%s: %s command: %s\n",
+                    _progname, errtype, pargv[0]);
             exit(EX_USAGE);
         }
         (*c->handler) (pargc, pargv);
+        xfree(splitbuf);
         exit(0);
     }
 #ifdef WITH_READLINE
@@ -377,7 +384,7 @@ void setpeer(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("connect ", "(to) ");
-        makeargv();
+        makeargv(line, margv, &margc);
         argc = margc;
         argv = margv;
     }
@@ -511,7 +518,7 @@ void put(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("send ", "(file) ");
-        makeargv();
+        makeargv(line, margv, &margc);
         argc = margc;
         argv = margv;
     }
@@ -600,7 +607,7 @@ void get(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("get ", "(files) ");
-        makeargv();
+        makeargv(line, margv, &margc);
         argc = margc;
         argv = margv;
     }
@@ -679,7 +686,7 @@ void setrexmt(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("rexmt-timeout ", "(value) ");
-        makeargv();
+        makeargv(line, margv, &margc);
         argc = margc;
         argv = margv;
     }
@@ -702,7 +709,7 @@ void settimeout(int argc, char *argv[])
 
     if (argc < 2) {
         getmoreargs("maximum-timeout ", "(value) ");
-        makeargv();
+        makeargv(line, margv, &margc);
         argc = margc;
         argv = margv;
     }
@@ -769,7 +776,8 @@ char *tail(char *filename)
  */
 static void command(void)
 {
-    struct cmd *c;
+    const struct cmd *c;
+    const char *errtype;
 
     for (;;) {
 #ifdef WITH_READLINE
@@ -797,30 +805,26 @@ static void command(void)
         add_history(line);
 #endif
 #endif
-        makeargv();
+        makeargv(line, margv, &margc);
         if (margc == 0)
             continue;
 
-        c = getcmd(margv[0]);
-        if (c == (struct cmd *)-1) {
-            printf("?Ambiguous command\n");
-            continue;
-        }
-        if (c == 0) {
-            printf("?Invalid command\n");
+        c = getcmd(margv[0], &errtype);
+        if (!c) {
+            printf("Error: %s command: %s\n", errtype, margv[0]);
             continue;
         }
         (*c->handler) (margc, margv);
     }
 }
 
-struct cmd *getcmd(char *name)
+static const struct cmd *getcmd(const char *name, const char **errtype)
 {
-    const char *p;
-    char *q;
-    struct cmd *c, *found;
+    const char *p, *q;
+    const struct cmd *c, *found;
     int nmatches, longest;
 
+    *errtype = NULL;
     longest = 0;
     nmatches = 0;
     found = 0;
@@ -837,8 +841,14 @@ struct cmd *getcmd(char *name)
                 nmatches++;
         }
     }
-    if (nmatches > 1)
-        return ((struct cmd *)-1);
+    if (nmatches > 1) {
+        *errtype = "ambiguous";
+        return NULL;
+    } else if (!nmatches) {
+        *errtype = "invalid";
+        return NULL;
+    }
+
     return (found);
 }
 
@@ -846,15 +856,18 @@ struct cmd *getcmd(char *name)
  * Slice a string up into argc/argv. Silently discards any words beyond
  * MARGVSIZE - 1 (leaving room for the NULL terminator) rather than
  * overflowing the fixed-size margv[] array.
+ *
+ * The string is modified in-place!
+ *
+ * XXX: handle quotes and escapes!
  */
-static void makeargv(void)
+static void makeargv(char *str, char **argp, int *argcp)
 {
     char *cp;
-    char **argp = margv;
-    char **const argpend = &margv[MARGVSIZE - 1];
+    char ** const argpend = &argp[MARGVSIZE - 1];
 
     margc = 0;
-    for (cp = line; *cp;) {
+    for (cp = str; *cp;) {
         while (isspace(*cp))
             cp++;
         if (*cp == '\0')
@@ -862,7 +875,7 @@ static void makeargv(void)
         if (argp >= argpend)
             break;
         *argp++ = cp;
-        margc += 1;
+        (*argcp)++;
         while (*cp != '\0' && !isspace(*cp))
             cp++;
         if (*cp == '\0')
@@ -884,7 +897,7 @@ void quit(int argc, char *argv[])
  */
 void help(int argc, char *argv[])
 {
-    struct cmd *c;
+    const struct cmd *c;
 
     printf("%s\n", VERSION);
 
@@ -895,13 +908,12 @@ void help(int argc, char *argv[])
         return;
     }
     while (--argc > 0) {
+        const char *errtype;
         char *arg;
         arg = *++argv;
-        c = getcmd(arg);
-        if (c == (struct cmd *)-1)
-            printf("?Ambiguous help command %s\n", arg);
-        else if (c == (struct cmd *)0)
-            printf("?Invalid help command %s\n", arg);
+        c = getcmd(arg, &errtype);
+        if (!c)
+            printf("help: %s command %s\n", errtype, arg);
         else
             printf("%s\n", c->help);
     }
