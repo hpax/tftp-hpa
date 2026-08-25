@@ -1,3 +1,34 @@
+Changes in 5.5:
+	tftpd can now use systemd socket activation with the
+	--systemd option.  The service accepts the descriptors passed
+	by systemd and remains in the foreground; --address and
+	--systemd cannot be used together.
+
+	The default UDP service used for listeners without an explicit
+	port can now be overridden with --service, --port, or -S.  The
+	--ports alias is also available for --port-range, and --chroot
+	is an alias for --secure.
+
+	tftpd now builds correctly when IPv6 support is disabled with
+	--disable-ipv6.
+
+	Improve validation of tftp -c commands: an empty or missing
+	command now fails with a usage error instead of entering
+	interactive mode or crashing. If -c is passed a single
+	argument, it is split into tokens as if it had been entered
+	from the interactive command line.
+
+	Improve diagnostics for invalid wildcard listener addresses.
+
+	Fix handling of jump labels in the rewrite file.
+
+	Handle binding to an address which has not yet been configured
+	on platforms which support it. This can avoid race conditions
+	during startup.
+
+	Various configure and make improvements (see ./configure --help).
+
+
 Changes in 5.4:
 	*** Read the man page for important details ***
 
