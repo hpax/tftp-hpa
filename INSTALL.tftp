@@ -19,6 +19,8 @@ The tftp-hpa package supports the following options to ./configure:
 	Disables the use of the readline command-line editing library
 	in the tftp client.
 
+For additional options see ./configure --help.
+
 The default prefix for the tftp-hpa package is /usr, with the tftp
 client installing as /usr/bin/tftp and the tftpd server installing as
 /usr/sbin/in.tftpd on most systems.  This can be overridden by setting
