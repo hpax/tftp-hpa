@@ -1,4 +1,9 @@
 Changes in 5.5:
+	tftpd now supports multiple --address arguments to bind to
+	multiple addresses. Furthermore, if --address is given a
+	domain name that resolves to multiple addresses, tftpd will
+	bind to all those addresses.
+
 	tftpd can now use systemd socket activation with the
 	--systemd option.  The service accepts the descriptors passed
 	by systemd and remains in the foreground; --address and
