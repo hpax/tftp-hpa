@@ -8,7 +8,7 @@
 .\" Copyright 2001-2009, 2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTPD 8 "7 June 2014" "tftp-hpa @@VERSION@@" "System Manager's Manual"
+.TH TFTPD 8 "24 August 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
 .SH NAME
 .B tftpd
 \- Trivial File Transfer Protocol server
@@ -217,6 +217,17 @@ on a standard Ethernet (MTU 1500) a value of 1468 is reasonable.
 \fB\-\-port-range\fP \fIport:port\fP, \fB\-R\fP \fIport:port\fP
 Force the server port number (the Transaction ID) to be in the
 specified range of port numbers.
+.TP
+\fB\-\-systemd\fP
+Use
+.B systemd
+socket activation. This option is only used in a
+.B systemd
+unit file. See
+.MR systemd.socket 5 .
+.IP
+Implies
+.BR \-\-foreground .
 .TP
 \fB\-\-version\fP, \fB\-V\fP
 Print the version number and configuration to standard output, then
@@ -551,5 +562,6 @@ added patches by Markus Gutschke and Gero Kulhman.
 .MR umask 2 ,
 .MR hosts_access 5 ,
 .MR services 5 ,
+.MR systemd.socket 5 ,
 .MR regex 7 ,
 .MR inetd 8 .

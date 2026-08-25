@@ -278,11 +278,29 @@ static void tftpd_out_of_memory(void)
     exit(EX_OSERR);
 }
 
+static long getenv_ulong(const char *var)
+{
+    const char *val = getenv(var);
+    char *ep;
+    unsigned long n;
+
+    if (!val || !*val)
+        return -1;
+
+    errno = 0;
+    n = strtoul(val, &ep, 0);
+    if (errno || ep == val || *ep || n > LONG_MAX)
+        return -1;
+
+    return n;
+}
+
 enum long_only_options {
     OPT_VERBOSITY	= 256,
     OPT_STDERR,
     OPT_MAP_TEST,
-    OPT_MAP_STEPS
+    OPT_MAP_STEPS,
+    OPT_SYSTEMD
 };
 
 static struct option long_options[] = {
@@ -313,6 +331,7 @@ static struct option long_options[] = {
     { "pidfile",     1, NULL, 'P' },
     { "stderr",      0, NULL, OPT_STDERR },
     { "map-test",    1, NULL, OPT_MAP_TEST },
+    { "systemd",     0, NULL, OPT_SYSTEMD },
     { NULL, 0, NULL, 0 }
 };
 static const char short_options[] = "46cspvVlLa:B:u:U:r:t:T:R:S:m:P:";
@@ -335,6 +354,7 @@ int main(int argc, char **argv)
     int fd = -1;
     int standalone = 0;         /* Standalone (listen) mode */
     int nodaemon = 0;           /* Do not detach process */
+    int systemd = 0;            /* Not using systemd socket activation */
     pid_t pid;
     mode_t my_umask = 0;
     int spec_umask = 0;
@@ -514,6 +534,11 @@ int main(int argc, char **argv)
         case OPT_STDERR:
             use_stderr = 1;
             break;
+        case OPT_SYSTEMD:
+            standalone = 1;
+            nodaemon = 1;
+            systemd = 1;
+            break;
         case 'V':
             /* Print configuration to stdout and exit */
             printf("%s\n", TFTPD_CONFIG_STR);
@@ -601,11 +626,31 @@ int main(int argc, char **argv)
         struct liststr *ls;
         FILE *pf;
 
-        if (strlist_isempty(&listen_addrs))
-            strlist_add(&listen_addrs, ":");
+        if (systemd) {
+            int startfd = 3;    /* Fixed by systemd protocol */
+            long nfds = getenv_ulong("LISTEN_FDS");
+            long listen_pid = getenv_ulong("LISTEN_PID");
 
-        for (ls = listen_addrs.list; ls; ls = ls->next)
-            listen_to(listen_set, ls->str, ai_fam);
+            if (!strlist_isempty(&listen_addrs)) {
+                tftpd_log(LOG_ERR, "--address and --systemd are mutually exclusive");
+                exit(EX_USAGE);
+            }
+
+            if (listen_pid == getpid() && nfds > 0
+                && nfds <= INT_MAX-startfd) {
+                while (nfds--)
+                    pollset_add(listen_set, startfd++);
+            } else {
+                tftpd_log(LOG_ERR, "--systemd specified, but no file descriptors passed");
+                exit(EX_NOINPUT);
+            }
+        } else {
+            if (strlist_isempty(&listen_addrs))
+                strlist_add(&listen_addrs, ":");
+
+            for (ls = listen_addrs.list; ls; ls = ls->next)
+                listen_to(listen_set, ls->str, ai_fam);
+        }
 
         strlist_free(&listen_addrs);
 
