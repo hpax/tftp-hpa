@@ -100,7 +100,7 @@ or
 .B \-\-umask
 options are specified.
 .TP
-\fB\-\-secure\fP, \fB\-s\fP
+\fB\-\-secure\fP, \fB\-\-chroot\fP, \fB\-s\fP
 Change root directory on startup using
 .MR chroot 2 .
 This means the remote host does not
