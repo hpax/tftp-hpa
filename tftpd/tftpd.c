@@ -64,7 +64,7 @@ static sigjmp_buf timeoutbuf;
 static uint16_t rollover_val = 0;
 
 #define	PKTSIZE	MAX_SEGSIZE+4
-#define IO_RING_MAX_BYTES (256U * 1024U)
+#define IO_RING_MIN_BYTES (256U * 1024U)
 #define MAX_MAX_WINDOWSIZE	32768	/* More than this gets dangerous */
 #ifndef MAX_WINDOWSIZE
 # define MAX_WINDOWSIZE		MAX_MAX_WINDOWSIZE
@@ -1288,26 +1288,23 @@ static void negotiate_windowsize(char **ap)
 
 #ifdef HAVE_PTHREAD
 /*
- * Keep at least one full window for retransmission and at least two packet
- * slots, and otherwise allow asynchronous I/O to run up to 256 KiB ahead.
- * An unlimited transfer window uses the same 256 KiB practical ceiling.
+ * Keep at least one full window for retransmission, then for
+ * asynchronous I/O allow for the largest of:
+ * 1. one full TFTP window;
+ * 2. two full TFTP blocks;
+ * 3. IO_RING_MIN_BYTES (256 KiB by default).
  */
 static unsigned int io_ring_slots(void)
 {
-    uintmax_t bytes = max_windowbytes;
-    uintmax_t slots;
-    size_t packetsize = ((size_t)segsize + 5) & ~(size_t)1;
+    unsigned int io_slots;
 
-    if (!bytes || bytes > IO_RING_MAX_BYTES)
-        bytes = IO_RING_MAX_BYTES;
+    io_slots = (segsize + IO_RING_MIN_BYTES - 1) / segsize;
+    if (io_slots < windowsize)
+        io_slots = windowsize;
+    if (io_slots < 2)
+        io_slots = 2;
 
-    slots = bytes / packetsize;
-    if (slots < windowsize)
-        slots = windowsize;
-    if (slots < 2)
-        slots = 2;
-
-    return (unsigned int)slots;
+    return windowsize + io_slots;
 }
 #endif
 
