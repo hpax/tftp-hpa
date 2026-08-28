@@ -421,7 +421,7 @@ makerequest(int request, const char *name,
     if (requested_window) {
         (void)snprintf(window_value, sizeof(window_value), "%u",
                        requested_window);
-        optionlen = sizeof("windowsize") + strlen(window_value);
+        optionlen += sizeof("windowsize") + strlen(window_value);
     }
 
     /*
