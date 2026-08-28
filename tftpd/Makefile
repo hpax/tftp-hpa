@@ -10,12 +10,14 @@ VERSION = $(shell cat ../version)
 include ../MRULES
 
 OBJS  = tftpd.$(O) recvfrom.$(O) misc.$(O) path.$(O) listen.$(O) \
-	strlist.$(O) $(TFTPDOBJS)
+	strlist.$(O) tftpio.$(O) $(TFTPDOBJS)
 
 all: tftpd$(X) tftpd.8
 
 tftpd$(X): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o tftpd$(X) $(OBJS) $(TFTPD_LIBS)
+	$(CC) $(CFLAGS) $(PTHREAD_CFLAGS) $(LDFLAGS) -o tftpd$(X) $(OBJS) $(TFTPD_LIBS) $(PTHREAD_LIBS)
+
+tftpio.$(O): CFLAGS += $(PTHREAD_CFLAGS)
 
 $(OBJS): ../common/tftpsubs.h
 

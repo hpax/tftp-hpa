@@ -28,6 +28,9 @@
 #include "common/pollset.h"
 #include "recvfrom.h"
 #include "remap.h"
+#ifdef HAVE_PTHREAD
+#include "tftpio.h"
+#endif
 
 #ifdef HAVE_SYS_FILIO_H
 #include <sys/filio.h>          /* Necessary for FIONBIO on Solaris */
@@ -1661,7 +1664,13 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     static u_short block = 1;   /* Static to avoid longjmp funnies */
     u_short ap_opcode, ap_block;
     unsigned long r_timeout;
-    int size, n;
+    int n;
+#ifndef HAVE_PTHREAD
+    int size;
+#endif
+#ifdef HAVE_PTHREAD
+    static struct tftpio *io;
+#endif
 
     if (oap) {
         timeout = rexmtval;
@@ -1697,6 +1706,72 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         }
     }
 
+#ifdef HAVE_PTHREAD
+    {
+        static unsigned int packet_count;
+        static int final;
+        u_short expected_ack;
+
+        io = tftpio_reader_start(file, pf->f_convert, windowsize, segsize);
+        if (!io) {
+            nak(-errno, NULL);
+            goto abort;
+        }
+        for (;;) {
+            if (tftpio_reader_window(io, &packet_count, &final) < 0) {
+                nak(-errno, NULL);
+                goto abort;
+            }
+            for (n = 0; n < (int)packet_count; n++) {
+                dp = tftpio_reader_packet(io, (unsigned int)n);
+                dp->th_opcode = htons((u_short) DATA);
+                dp->th_block = htons((u_short)block);
+                if (!++block)
+                    block = rollover_val;
+            }
+
+            timeout = rexmtval;
+            (void)sigsetjmp(timeoutbuf, 1);
+          resend_window:
+            for (n = 0; n < (int)packet_count; n++) {
+                dp = tftpio_reader_packet(io, (unsigned int)n);
+                if (send(peer, dp, tftpio_reader_length(io, (unsigned int)n),
+                         0) != tftpio_reader_length(io, (unsigned int)n)) {
+                    tftpd_log(LOG_WARNING, "tftpd: write: %m");
+                    goto abort;
+                }
+            }
+            r_timeout = timeout;
+            for (;;) {
+                n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
+                if (n < 0) {
+                    tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
+                    goto abort;
+                }
+                ap = (struct tftphdr *)ackbuf;
+                ap_opcode = ntohs((u_short)ap->th_opcode);
+                ap_block = ntohs((u_short)ap->th_block);
+                if (ap_opcode == ERROR)
+                    goto abort;
+                expected_ack = ntohs(tftpio_reader_packet(io, packet_count - 1)
+                                     ->th_block);
+                if (ap_opcode == ACK && ap_block == expected_ack)
+                    break;
+                if (ap_opcode == ACK)
+                    (void)synchnet(peer);
+                else if (ap_opcode == OACK)
+                    goto resend_window;
+            }
+            tftpio_reader_release(io);
+            if (final)
+                break;
+        }
+    }
+  abort:
+    tftpio_stop(io);
+    io = NULL;
+    (void)fclose(file);
+#else
     {
         size_t packetsize = ((size_t)segsize + 5) & ~(size_t)1;
         char *packets = xcalloc(windowsize, packetsize);
@@ -1767,6 +1842,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     }
   abort:
     (void)fclose(file);
+#endif
 }
 
 /*
@@ -1775,7 +1851,12 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
 static void tftp_recvfile(const struct formats *pf,
 			  struct tftphdr *oack, int oacklen)
 {
+#ifdef HAVE_PTHREAD
+    static struct tftphdr *dp;
+    static struct tftpio *io;
+#else
     struct tftphdr *dp;
+#endif
     int n, size, restarted, final;
     /* These are "static" to avoid longjmp funnies */
     static struct tftphdr *oap;
@@ -1788,7 +1869,20 @@ static void tftp_recvfile(const struct formats *pf,
     unsigned long r_timeout;
 
     oap = oack;
+#ifdef HAVE_PTHREAD
+    io = tftpio_writer_start(file, pf->f_convert, windowsize);
+    if (!io) {
+        nak(-errno, NULL);
+        goto abort;
+    }
+    dp = tftpio_writer_reserve(io);
+    if (!dp) {
+        nak(-errno, NULL);
+        goto abort;
+    }
+#else
     dp = w_init();
+#endif
     block = 1;
     last_acked = 0;
     packets_in_window = 0;
@@ -1813,7 +1907,9 @@ static void tftp_recvfile(const struct formats *pf,
                 tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
                 goto abort;
             }
+#ifndef HAVE_PTHREAD
             write_behind(file, pf->f_convert);
+#endif
         }
         r_timeout = timeout;
         for (;;) {
@@ -1841,6 +1937,10 @@ static void tftp_recvfile(const struct formats *pf,
             nak(EBADOP, "Data packet too large");
             goto abort;
         }
+#ifdef HAVE_PTHREAD
+        size = n - 4;
+        tftpio_writer_publish(io, size);
+#else
         size = writeit(file, &dp, n - 4, pf->f_convert);
         if (size != (n - 4)) {
             if (size < 0)
@@ -1849,6 +1949,7 @@ static void tftp_recvfile(const struct formats *pf,
                 nak(ENOSPACE, NULL);
             goto abort;
         }
+#endif
         final = size != segsize;
         packets_in_window++;
         if (!++block)
@@ -1859,17 +1960,38 @@ static void tftp_recvfile(const struct formats *pf,
             ap->th_opcode = htons((u_short) ACK);
             ap->th_block = htons(last_acked);
             acksize = 4;
+#ifdef HAVE_PTHREAD
+            if (tftpio_writer_drain(io) < 0) {
+                nak(-errno, NULL);
+                goto abort;
+            }
+#endif
             if (send(peer, ap, acksize, 0) != acksize) {
                 tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
                 goto abort;
             }
+#ifndef HAVE_PTHREAD
             write_behind(file, pf->f_convert);
+#endif
             if (final)
                 break;
         }
+#ifdef HAVE_PTHREAD
+        dp = tftpio_writer_reserve(io);
+        if (!dp) {
+            nak(-errno, NULL);
+            goto abort;
+        }
+#endif
     }
+#ifdef HAVE_PTHREAD
+    tftpio_stop(io);
+    io = NULL;
+#else
     write_behind(file, pf->f_convert);
+#endif
     (void)fclose(file);         /* close data file */
+    file = NULL;
 
     timeout_quit = 1;           /* just quit on timeout */
     n = recv_time(peer, buf, sizeof(buf), 0, &timeout); /* normally times out and quits */
@@ -1881,6 +2003,14 @@ static void tftp_recvfile(const struct formats *pf,
         (void)send(peer, ackbuf, 4, 0); /* resend final ack */
     }
   abort:
+#ifdef HAVE_PTHREAD
+    tftpio_stop(io);
+    io = NULL;
+#endif
+    if (file) {
+        (void)fclose(file);
+        file = NULL;
+    }
     return;
 }
 

@@ -188,6 +188,50 @@ dnl
 common_libs="$LIBS"
 
 AC_CHECK_DECLS(IPPORT_TFTP)
+AC_CHECK_HEADERS_ONCE([pthread.h])
+AS_IF([test "x$ac_cv_header_pthread_h" = xyes], [
+  pthread_save_CFLAGS=$CFLAGS
+  pthread_save_LIBS=$LIBS
+  PTHREAD_CFLAGS=
+  PTHREAD_LIBS=
+  pthread_found=no
+  AC_MSG_CHECKING([for POSIX threads])
+  for pthread_flag in none -pthread -pthreads -lpthread -lthread; do
+    CFLAGS=$pthread_save_CFLAGS
+    LIBS=$pthread_save_LIBS
+    case $pthread_flag in
+      none) ;;
+      -pthread|-pthreads)
+        CFLAGS="$CFLAGS $pthread_flag"
+        LIBS="$LIBS $pthread_flag"
+        ;;
+      *) LIBS="$LIBS $pthread_flag" ;;
+    esac
+    AC_LINK_IFELSE(
+      [AC_LANG_PROGRAM([[#include <pthread.h>]],
+                       [[pthread_t thread;
+                         return pthread_create(&thread, NULL, NULL, NULL);]])],
+      [pthread_found=yes
+       case $pthread_flag in
+         none) ;;
+         -pthread|-pthreads)
+           PTHREAD_CFLAGS=$pthread_flag
+           PTHREAD_LIBS=$pthread_flag
+           ;;
+         *) PTHREAD_LIBS=$pthread_flag ;;
+       esac
+       break])
+  done
+  CFLAGS=$pthread_save_CFLAGS
+  LIBS=$pthread_save_LIBS
+  AS_IF([test "$pthread_found" = yes], [
+    AC_MSG_RESULT([yes])
+    AC_DEFINE([HAVE_PTHREAD], 1,
+      [Define to 1 if the server can use POSIX threads.])
+  ], [AC_MSG_RESULT([no])])
+])
+AC_SUBST([PTHREAD_CFLAGS])
+AC_SUBST([PTHREAD_LIBS])
 
 AC_ARG_VAR([TFTPD_MAX_WINDOWSIZE],
  [maximum RFC 7440 windowsize accepted by tftpd (default: 256)])

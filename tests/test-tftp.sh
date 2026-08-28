@@ -249,7 +249,8 @@ main() {
     local -a testfiles=(small.txt multiline.txt numbers.txt medium.bin
 			window-boundary.bin large.bin)
 
-    for WINSIZE in 1 4 64; do
+    # The largest supported client window exercises the threaded packet ring.
+    for WINSIZE in ${TFTP_TEST_WINSIZES:-1 4 64}; do
 	for LOCALHOST in $LOCALHOSTS; do
 	    # Clear test directory of any previously downloaded files
 	    rm -f "$TEST_DIR"/*.downloaded

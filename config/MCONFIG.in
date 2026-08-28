@@ -57,6 +57,8 @@ LDFLAGS = @LDFLAGS@
 # Libraries (client and server)
 TFTP_LIBS  = ../common/libcommon.a @TFTP_LIBS@
 TFTPD_LIBS = ../common/libcommon.a @TFTPD_LIBS@
+PTHREAD_CFLAGS = @PTHREAD_CFLAGS@
+PTHREAD_LIBS   = @PTHREAD_LIBS@
 
 # Additional library we need to build
 LIBOBJS	= @LIBOBJS@
