@@ -58,8 +58,9 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     socklen_t fromlen;
     FILE *file = NULL;
     char * volatile packets = NULL;
-    int lengths[64];
+    int * volatile lengths = NULL;
     int n, size;
+    size_t packetsize;
     volatile int packet_count, final;
     int convert = !strcmp(mode, "netascii");
     volatile unsigned int window;
@@ -130,7 +131,9 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     }
 
     dp = r_init();
-    packets = xmalloc((size_t)window * (MAX_SEGSIZE + 4));
+    packetsize = ((size_t)segsize + 5) & ~(size_t)1;
+    packets = xcalloc(window, packetsize);
+    lengths = xcalloc(window, sizeof(*lengths));
     for (;;) {
         packet_count = 0;
         final = 0;
@@ -142,7 +145,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             }
             dp->th_opcode = htons((u_short)DATA);
             dp->th_block = htons(block);
-            memcpy(packets + (size_t)packet_count * (MAX_SEGSIZE + 4),
+            memcpy(packets + (size_t)packet_count * packetsize,
                    dp, (size_t)size + 4);
             lengths[packet_count] = size + 4;
             read_ahead(file, convert);
@@ -157,7 +160,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
       resend_window:
         for (n = 0; n < packet_count; n++) {
             dp = (struct tftphdr *)(packets +
-                                    (size_t)n * (MAX_SEGSIZE + 4));
+                                    (size_t)n * packetsize);
             if (trace)
                 tpacket("sent", dp, lengths[n]);
             if (sendto(f, dp, lengths[n], 0, &peeraddr.sa,
@@ -188,7 +191,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             }
             expected_ack = ntohs(((struct tftphdr *)(packets +
                                   (size_t)(packet_count - 1) *
-                                  (MAX_SEGSIZE + 4)))->th_block);
+                                  packetsize))->th_block);
             if (ap_opcode == ACK && ap_block == expected_ack)
                 break;
             if (ap_opcode == OACK && requested_window)
@@ -203,6 +206,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     }
 
   abort_packets:
+    xfree(lengths);
     xfree(packets);
   abort:
     if (file)
