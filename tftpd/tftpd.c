@@ -1698,7 +1698,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     }
 
     {
-        size_t packetsize = (sizeof(*dp) + 1) & ~(size_t)1;
+        size_t packetsize = ((size_t)segsize + 5) & ~(size_t)1;
         char *packets = xcalloc(windowsize, packetsize);
         int *lengths = xcalloc(windowsize, sizeof(*lengths));
         volatile int packet_count, final;
