@@ -34,6 +34,7 @@ struct tftpio {
     pthread_cond_t changed;
     unsigned int slots;
     unsigned int window;
+    unsigned int blocksize;
     unsigned int packetsize;
     unsigned int head;
     unsigned int tail;
@@ -70,14 +71,14 @@ static int read_packet(struct tftpio *io, struct tftphdr *dp)
     ssize_t n;
 
     if (!io->convert) {
-        n = read(fileno(io->file), dp->th_data, io->packetsize - 4);
+        n = read(fileno(io->file), dp->th_data, io->blocksize);
         if (n < 0)
             return -1;
         return (int)n;
     }
 
     p = dp->th_data;
-    for (i = 0; i < io->packetsize - 4; i++) {
+    for (i = 0; i < io->blocksize; i++) {
         if (io->newline) {
             c = io->prevchar == '\n' ? '\n' : '\0';
             io->newline = 0;
@@ -182,7 +183,7 @@ static void *reader_thread(void *arg)
         io->lengths[io->tail] = length + 4;
         io->tail = io_next(io, io->tail);
         io->count++;
-        if (length != (int)(io->packetsize - 4))
+        if (length != (int)io->blocksize)
             io->eof = 1;
         pthread_cond_broadcast(&io->changed);
         if (io->eof || io->stopped) {
@@ -244,6 +245,7 @@ static struct tftpio *io_start(FILE *file, int convert, unsigned int slots,
     io->file = file;
     io->slots = slots;
     io->window = window;
+    io->blocksize = blocksize;
     io->packetsize = ((size_t)blocksize + 5) & ~(size_t)1;
     io->convert = convert;
     io->prevchar = -1;
