@@ -64,6 +64,7 @@ static uint16_t rollover_val = 0;
 static char buf[PKTSIZE];
 static char ackbuf[PKTSIZE];
 static unsigned int max_blksize = MAX_SEGSIZE;
+static unsigned int windowsize = 1;
 
 static char tmpbuf[INET6_ADDRSTRLEN], *tmp_p;
 
@@ -99,6 +100,7 @@ static int set_tsize(uintmax_t *);
 static int set_timeout(uintmax_t *);
 static int set_utimeout(uintmax_t *);
 static int set_rollover(uintmax_t *);
+static int set_windowsize(uintmax_t *);
 
 struct options {
     const char *o_opt;
@@ -110,6 +112,7 @@ struct options {
     {"timeout",  set_timeout},
     {"utimeout", set_utimeout},
     {"rollover", set_rollover},
+    {"windowsize", set_windowsize},
     {NULL, NULL}
 };
 
@@ -1004,6 +1007,7 @@ int tftp(struct tftphdr *tp, int size)
     char *ap = ackbuf + 2;
 
     ((struct tftphdr *)ackbuf)->th_opcode = htons(OACK);
+    windowsize = 1;
 
     origfilename = cp = (char *)&(tp->th_stuff);
     argn = 0;
@@ -1162,6 +1166,20 @@ static int set_rollover(uintmax_t *vp)
 	return 0;
 
     rollover_val = (uint16_t)ro;
+    return 1;
+}
+
+/*
+ * Set the number of DATA packets sent before an ACK is expected
+ * (RFC 7440).  Limit this to the same conservative value exposed by
+ * the client.
+ */
+static int set_windowsize(uintmax_t *vp)
+{
+    if (*vp < 1 || *vp > 64)
+        return 0;
+
+    windowsize = (unsigned int)*vp;
     return 1;
 }
 
@@ -1586,54 +1604,72 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         }
     }
 
-    dp = r_init();
-    do {
-        size = readit(file, &dp, pf->f_convert);
-        if (size < 0) {
-            nak(-errno, NULL);
-            goto abort;
-        }
-        dp->th_opcode = htons((u_short) DATA);
-        dp->th_block = htons((u_short) block);
-        timeout = rexmtval;
-        (void)sigsetjmp(timeoutbuf, 1);
+    {
+        char *packets = xmalloc((size_t)windowsize * PKTSIZE);
+        int lengths[64];
+        volatile int packet_count, final;
+        u_short expected_ack;
 
-        r_timeout = timeout;
-        if (send(peer, dp, size + 4, 0) != size + 4) {
-            tftpd_log(LOG_WARNING, "tftpd: write: %m");
-            goto abort;
-        }
-        read_ahead(file, pf->f_convert);
+        dp = r_init();
         for (;;) {
-            n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
-            if (n < 0) {
-                tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
-                goto abort;
-            }
-            ap = (struct tftphdr *)ackbuf;
-            ap_opcode = ntohs((u_short) ap->th_opcode);
-            ap_block = ntohs((u_short) ap->th_block);
-
-            if (ap_opcode == ERROR)
-                goto abort;
-
-            if (ap_opcode == ACK) {
-                if (ap_block == block) {
-                    break;
+            packet_count = 0;
+            final = 0;
+            do {
+                size = readit(file, &dp, pf->f_convert);
+                if (size < 0) {
+                    nak(-errno, NULL);
+                    goto abort_packets;
                 }
-                /* Re-synchronize with the other side */
-                (void)synchnet(peer);
-                /*
-                 * RFC1129/RFC1350: We MUST NOT re-send the DATA
-                 * packet in response to an invalid ACK.  Doing so
-                 * would cause the Sorcerer's Apprentice bug.
-                 */
-            }
+                dp->th_opcode = htons((u_short) DATA);
+                dp->th_block = htons((u_short) block);
+                memcpy(packets + (size_t)packet_count * PKTSIZE, dp,
+                       (size_t)size + 4);
+                lengths[packet_count++] = size + 4;
+                read_ahead(file, pf->f_convert);
+                if (size != segsize)
+                    final = 1;
+                if (!++block)
+                    block = rollover_val;
+            } while (packet_count < (int)windowsize && !final);
 
+            timeout = rexmtval;
+            (void)sigsetjmp(timeoutbuf, 1);
+          resend_window:
+            for (n = 0; n < packet_count; n++) {
+                dp = (struct tftphdr *)(packets + (size_t)n * PKTSIZE);
+                if (send(peer, dp, lengths[n], 0) != lengths[n]) {
+                    tftpd_log(LOG_WARNING, "tftpd: write: %m");
+                    goto abort_packets;
+                }
+            }
+            r_timeout = timeout;
+            for (;;) {
+                n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
+                if (n < 0) {
+                    tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
+                    goto abort_packets;
+                }
+                ap = (struct tftphdr *)ackbuf;
+                ap_opcode = ntohs((u_short) ap->th_opcode);
+                ap_block = ntohs((u_short) ap->th_block);
+                if (ap_opcode == ERROR)
+                    goto abort_packets;
+                expected_ack = ntohs(((struct tftphdr *)
+                                      (packets + (size_t)(packet_count - 1) *
+                                       PKTSIZE))->th_block);
+                if (ap_opcode == ACK && ap_block == expected_ack)
+                    break;
+                if (ap_opcode == ACK)
+                    (void)synchnet(peer);
+                else if (ap_opcode == OACK)
+                    goto resend_window;
+            }
+            if (final)
+                break;
         }
-	if (!++block)
-	  block = rollover_val;
-    } while (size == segsize);
+      abort_packets:
+        xfree(packets);
+    }
   abort:
     (void)fclose(file);
 }
@@ -1645,47 +1681,49 @@ static void tftp_recvfile(const struct formats *pf,
 			  struct tftphdr *oack, int oacklen)
 {
     struct tftphdr *dp;
-    int n, size;
+    int n, size, restarted, final;
     /* These are "static" to avoid longjmp funnies */
     static struct tftphdr *oap;
     static struct tftphdr *ap;  /* ack buffer */
-    static u_short block = 0;
+    static u_short block;
+    static u_short last_acked;
     static int acksize;
+    static unsigned int packets_in_window;
     u_short dp_opcode, dp_block;
     unsigned long r_timeout;
 
     oap = oack;
-
     dp = w_init();
-    do {
-        timeout = rexmtval;
+    block = 1;
+    last_acked = 0;
+    packets_in_window = 0;
+    ap = (struct tftphdr *)ackbuf;
+    acksize = oacklen;
 
-        if (!block && oap) {
-            ap = (struct tftphdr *)ackbuf;
-            acksize = oacklen;
-        } else {
-            ap = (struct tftphdr *)ackbuf;
-            ap->th_opcode = htons((u_short) ACK);
-            ap->th_block = htons((u_short) block);
-            acksize = 4;
-            /* If we're sending a regular ACK, that means we have successfully
-             * sent the OACK. Clear oap so that we won't try to send another
-             * OACK when the block number wraps back to 0. */
-            oap = NULL;
+    for (;;) {
+        timeout = rexmtval;
+        restarted = sigsetjmp(timeoutbuf, 1);
+        if (oap || restarted) {
+            if (!oap) {
+                ap->th_opcode = htons((u_short) ACK);
+                ap->th_block = htons(last_acked);
+                acksize = 4;
+            }
+            /*
+             * For a WRQ, an OACK replaces ACK 0.  Once DATA 1 has been
+             * received, retransmissions use the most recent window ACK.
+             */
+            r_timeout = timeout;
+            if (send(peer, ap, acksize, 0) != acksize) {
+                tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
+                goto abort;
+            }
+            write_behind(file, pf->f_convert);
         }
-        if (!++block)
-	  block = rollover_val;
-        (void)sigsetjmp(timeoutbuf, 1);
-      send_ack:
         r_timeout = timeout;
-        if (send(peer, ackbuf, acksize, 0) != acksize) {
-            tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
-            goto abort;
-        }
-        write_behind(file, pf->f_convert);
         for (;;) {
             n = recv_time(peer, dp, PKTSIZE, 0, &r_timeout);
-            if (n < 0) {        /* really? */
+            if (n < 0) {
                 tftpd_log(LOG_WARNING, "tftpd: read: %m");
                 goto abort;
             }
@@ -1694,39 +1732,57 @@ static void tftp_recvfile(const struct formats *pf,
             if (dp_opcode == ERROR)
                 goto abort;
             if (dp_opcode == DATA) {
-                if (dp_block == block) {
-                    break;      /* normal */
+                if (dp_block == block)
+                    break;
+                if (dp_block == last_acked) {
+                    ap->th_opcode = htons((u_short) ACK);
+                    ap->th_block = htons(last_acked);
+                    (void)send(peer, ap, 4, 0);
                 }
-                /* Re-synchronize with the other side */
-                (void)synchnet(peer);
-                if (dp_block == (block - 1))
-                    goto send_ack;      /* rexmit */
             }
         }
-        /*  size = write(file, dp->th_data, n - 4); */
+        oap = NULL;
+        if (n < 4 || n - 4 > segsize) {
+            nak(EBADOP, "Data packet too large");
+            goto abort;
+        }
         size = writeit(file, &dp, n - 4, pf->f_convert);
-        if (size != (n - 4)) {  /* ahem */
+        if (size != (n - 4)) {
             if (size < 0)
                 nak(-errno, NULL);
             else
                 nak(ENOSPACE, NULL);
             goto abort;
         }
-    } while (size == segsize);
+        final = size != segsize;
+        packets_in_window++;
+        if (!++block)
+            block = rollover_val;
+        if (final || packets_in_window == windowsize) {
+            last_acked = dp_block;
+            packets_in_window = 0;
+            ap->th_opcode = htons((u_short) ACK);
+            ap->th_block = htons(last_acked);
+            acksize = 4;
+            if (send(peer, ap, acksize, 0) != acksize) {
+                tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
+                goto abort;
+            }
+            write_behind(file, pf->f_convert);
+            if (final)
+                break;
+        }
+    }
     write_behind(file, pf->f_convert);
     (void)fclose(file);         /* close data file */
-
-    ap->th_opcode = htons((u_short) ACK);       /* send the "final" ack */
-    ap->th_block = htons((u_short) (block));
-    (void)send(peer, ackbuf, 4, 0);
 
     timeout_quit = 1;           /* just quit on timeout */
     n = recv_time(peer, buf, sizeof(buf), 0, &timeout); /* normally times out and quits */
     timeout_quit = 0;
 
     if (n >= 4 &&               /* if read some data */
-        dp_opcode == DATA &&    /* and got a data block */
-        block == dp_block) {    /* then my last ack was lost */
+        ntohs(((struct tftphdr *)buf)->th_opcode) == DATA &&
+        last_acked == ntohs(((struct tftphdr *)buf)->th_block)) {
         (void)send(peer, ackbuf, 4, 0); /* resend final ack */
     }
   abort:

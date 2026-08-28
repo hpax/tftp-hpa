@@ -3,7 +3,7 @@
 # TFTP Client-Server Test Script
 # Tests bidirectional file transfer with an ephemeral TFTP server
 #
-# Usage: ./test-tftp.sh [tftpd_path] [tftp_path]
+# Usage: ./test-tftp.sh [tftpd_path] [tftp_path] [port] [portrange]
 #
 
 # Configuration
@@ -12,10 +12,12 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 TFTPD="${1:-$REPO_ROOT/tftpd/tftpd}"
 TFTP="${2:-${REPO_ROOT}/tftp/tftp}"
 PORT="${3:-6969}"
+PORTRANGE="${4:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
 TESTROOT=$(mktemp -d)
 TEST_DIR="$TESTROOT/client"
 SERVER_DIR="$TESTROOT/server"
+PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
 mkdir -p "$TEST_DIR" "$SERVER_DIR"
 
 trap 'cleanup' EXIT INT TERM
@@ -48,6 +50,14 @@ cleanup() {
         kill "$TFTPD_PID" 2>/dev/null
         sleep 1
         kill -9 "$TFTPD_PID" 2>/dev/null
+    fi
+
+    # Kill tshark if still running
+    if [ -n "$TSHARK_PID" ] && kill -0 "$TSHARK_PID" 2>/dev/null; then
+        print_info "Terminating tshark (PID $TSHARK_PID)..."
+        kill "$TSHARK_PID" 2>/dev/null
+        sleep 1
+        kill -9 "$TSHARK_PID" 2>/dev/null
     fi
 
     # Remove temporary directories
@@ -84,7 +94,8 @@ start_server() {
 
     # Start tftpd in the background, listening on localhost
     # Run in standalone mode, serve from SERVER_DIR
-    local -a TFTPD_CMD=("$TFTPD" --stderr -L -p -c $addrs "$SERVER_DIR")
+    local -a TFTPD_CMD=("$TFTPD" --stderr -L -p --port-range $PORTRANGE
+				 -c $addrs "$SERVER_DIR")
     print_info "${TFTPD_CMD[*]}"
     "${TFTPD_CMD[@]}" &
     TFTPD_PID=$!
@@ -99,7 +110,27 @@ start_server() {
     fi
 
     print_success "tftpd started with PID $TFTPD_PID"
+
+    me=$(whoami)
+
+    # If the user has access to tshark, dump a packet trace
+    rm -f "$PCAP_LOG"
+    local dumphosts=$(echo "$LOCALHOSTS" | \
+			  sed -E -e 's/([^[:space:]]*:[^[:space:]]*)/[\1]/g' \
+			  -e "s/([^[:space:]]+)/or host \\1/g" \
+			  -e 's/^or //')
+	   tshark -q -Q -i lo -n -w "$PCAP_LOG" \
+	   -f "udp port $PORT or portrange ${PORTRANGE/:/-}" \
+	   1>&2 2>/dev/null &
+    TSHARK_PID=$!
+    if kill -0 "$TSHARK_PID" 2>/dev/null; then
+	print_info "dumping packets to: $PCAP_LOG"
+    else
+	unset TSHARK_PID
+    fi
 }
+
+declare -a testfiles
 
 # Create test files
 create_test_files() {
@@ -111,11 +142,17 @@ create_test_files() {
     # Medium binary-like file
     dd if=/dev/urandom of="$TEST_DIR/medium.bin" bs=1024 count=10 2>/dev/null
 
+    # Exactly one four-block window; exercises the terminating empty block
+    dd if=/dev/urandom of="$TEST_DIR/window-boundary.bin" bs=512 count=4 2>/dev/null
+
     # Text file with multiple lines
     printf "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n" > "$TEST_DIR/multiline.txt"
 
     # Sparse ASCII file
     seq 1 100 > "$TEST_DIR/numbers.txt"
+
+    # Large file (> 65536 blocks)
+    dd if=/dev/urandom of="$TEST_DIR/large.bin" bs=512 count=67890 2>/dev/null
 
     print_success "Created test files in $TEST_DIR"
 }
@@ -123,6 +160,7 @@ create_test_files() {
 # Test file download (client receives)
 test_download() {
     local filename="$1"
+    local -a tftp_options=(-w $WINSIZE "${@:2}")
 
     print_info "Testing download: $filename"
 
@@ -134,7 +172,7 @@ test_download() {
     local download_file="$TEST_DIR/${filename}.downloaded"
 
     # Use non-interactive tftp with get command
-    local -a TFTP_CMD=("$TFTP" "$LOCALHOST" "$PORT"
+    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
 		       -c get "$server_file" "$download_file")
     print_info "${TFTP_CMD[*]}"
     ${TFTP_CMD[@]} 2>&1 | grep -v "^Connected"
@@ -157,6 +195,7 @@ test_download() {
 # Test file upload (client sends)
 test_upload() {
     local filename="$1"
+    local -a tftp_options=(-w $WINSIZE "${@:2}")
 
     print_info "Testing upload: $filename"
 
@@ -164,7 +203,7 @@ test_upload() {
 
     # Use tftp to upload the file
     # The server will write it to SERVER_DIR
-    local -a TFTP_CMD=("$TFTP" "$LOCALHOST" "$PORT"
+    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
 		       -c put "$TEST_DIR/$filename" "$server_file")
     print_info "${TFTP_CMD[*]}"
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
@@ -207,63 +246,36 @@ main() {
     # Give server a moment to start
     sleep 2
 
-    for LOCALHOST in $LOCALHOSTS; do
-	# Clear test directory of any previously downloaded files
-	rm -f "$TEST_DIR"/*.downloaded
+    local -a testfiles=(small.txt multiline.txt numbers.txt medium.bin
+			window-boundary.bin large.bin)
 
-	print_info "Running download tests..."
-	if test_download "small.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
+    for WINSIZE in 1 4 64; do
+	for LOCALHOST in $LOCALHOSTS; do
+	    # Clear test directory of any previously downloaded files
+	    rm -f "$TEST_DIR"/*.downloaded
 
-	if test_download "multiline.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
+	    print_info "Running download tests, window size $WINSIZE, address $LOCALHOST..."
+	    for testfile in "${testfiles[@]}"; do
+		if test_download $testfile; then
+		    ((tests_passed++))
+		else
+		    ((tests_failed++))
+		fi
+	    done
 
-	if test_download "numbers.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
+	    # Clear server directory of downloaded test files
+	    rm -f "$SERVER_DIR"/*
 
-	if test_download "medium.bin"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
+	    print_info "Running upload tests, window size $WINSIZE, address $LOCALHOST..."
 
-	print_info "Running upload tests..."
-
-	# Clear server directory of downloaded test files
-	rm -f "$SERVER_DIR"/*
-
-	if test_upload "small.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
-
-	if test_upload "multiline.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
-
-	if test_upload "numbers.txt"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
-
-	if test_upload "medium.bin"; then
-            ((tests_passed++))
-	else
-            ((tests_failed++))
-	fi
+	    for testfile in "${testfiles[@]}"; do
+		if test_upload $testfile; then
+		    ((tests_passed++))
+		else
+		    ((tests_failed++))
+		fi
+	    done
+	done
     done
 
     print_info ""

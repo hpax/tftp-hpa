@@ -10,8 +10,8 @@
 
 #include "config.h"
 
-void tftp_recvfile(int, const char *, const char *);
-void tftp_sendfile(int, const char *, const char *);
+void tftp_recvfile(int, const char *, const char *, unsigned int);
+void tftp_sendfile(int, const char *, const char *, unsigned int);
 extern sigjmp_buf toplevel;
 
 #endif

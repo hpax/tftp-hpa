@@ -76,6 +76,7 @@ struct servent *sp;
 int portrange = 0;
 unsigned int portrange_from = 0;
 unsigned int portrange_to = 0;
+unsigned int windowsize;
 
 void get(int, char **);
 void help(int, char **);
@@ -162,7 +163,7 @@ char *tail(char *);
 static void usage(int errcode)
 {
     fprintf(stderr,
-            "Usage: %s -[vl%s][-m mode] [host [port]] [-c command...]\n",
+            "Usage: %s -[vl%s][-m mode][-w window-size] [host [port]] [-c command...]\n",
 #ifdef HAVE_IPV6
             "46",
 #else
@@ -246,6 +247,24 @@ int main(int argc, char *argv[])
                     }
                     portrange = 1;
                     break;
+                case 'w':
+                {
+                    char *end;
+                    unsigned long value;
+
+                    if (++arg >= argc)
+                        usage(EX_USAGE);
+                    errno = 0;
+                    value = strtoul(argv[arg], &end, 10);
+                    if (errno || *argv[arg] == '\0' || *end ||
+                        value < 1 || value > 64) {
+                        fprintf(stderr, "Bad window size: %s (1-64)\n",
+                                argv[arg]);
+                        exit(EX_USAGE);
+                    }
+                    windowsize = (unsigned int)value;
+                    break;
+                }
                 case 'h':
                 default:
                     usage(*optx == 'h' ? 0 : EX_USAGE);
@@ -570,7 +589,7 @@ void put(int argc, char *argv[])
             printf("putting %s to %s:%s [%s]\n",
                    cp, hostname, targ, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_sendfile(fd, targ, mode->m_mode);
+        tftp_sendfile(fd, targ, mode->m_mode, windowsize);
         return;
     }
     /* this assumes the target is a directory */
@@ -591,7 +610,7 @@ void put(int argc, char *argv[])
             printf("putting %s to %s:%s [%s]\n",
                    argv[n], hostname, remotepath, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_sendfile(fd, remotepath, mode->m_mode);
+        tftp_sendfile(fd, remotepath, mode->m_mode, windowsize);
         free(remotepath);
     }
 }
@@ -660,7 +679,7 @@ void get(int argc, char *argv[])
                 printf("getting from %s:%s to %s [%s]\n",
                        hostname, src, cp, mode->m_mode);
             sa_set_port(&peeraddr, port);
-            tftp_recvfile(fd, src, mode->m_mode);
+            tftp_recvfile(fd, src, mode->m_mode, windowsize);
             break;
         }
         cp = tail(src);         /* new .. jdg */
@@ -675,7 +694,7 @@ void get(int argc, char *argv[])
             printf("getting from %s:%s to %s [%s]\n",
                    hostname, src, cp, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_recvfile(fd, src, mode->m_mode);
+        tftp_recvfile(fd, src, mode->m_mode, windowsize);
     }
 }
 

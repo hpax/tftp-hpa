@@ -265,6 +265,11 @@ Set the time before the server retransmits a packet, in seconds.
 \fButimeout\fP (nonstandard)
 Set the time before the server retransmits a packet, in microseconds.
 .TP
+\fBwindowsize\fP (RFC 7440)
+Set the number of data blocks sent before an acknowledgment is required.
+Values from 1 through 64 are supported.  A window is retransmitted if its
+acknowledgment is not received.
+.TP
 \fBrollover\fP (nonstandard)
 Set the block number to resume at after a block number rollover.  The
 default and recommended value is zero.
@@ -550,6 +555,9 @@ RFC 2348,
 .br
 RFC 2349,
 .IR "TFTP Timeout Interval and Transfer Size Options" .
+.br
+RFC 7440,
+.IR "TFTP Windowsize Option"
 .SH "AUTHOR"
 This version of
 .B tftpd
