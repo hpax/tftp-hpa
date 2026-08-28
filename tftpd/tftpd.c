@@ -46,6 +46,9 @@ static int ai_fam = AF_INET;
 #define TRIES   6               /* Number of attempts to send each packet */
 #define TIMEOUT_LIMIT ((1 << TRIES)-1)
 
+/* Default daemon wait timeout when not running standalone */
+#define DEFAULT_WAITTIME	(900*1000000)
+
 static int peer;
 static unsigned long timeout  = TIMEOUT;        /* Current timeout value */
 static unsigned long rexmtval = TIMEOUT;       /* Basic timeout value */
@@ -128,20 +131,19 @@ struct options {
     {NULL, NULL}
 };
 
-/* Simple handler for SIGHUP */
-static volatile sig_atomic_t caught_sighup = 0;
-static void handle_sighup(int sig)
-{
-    (void)sig;                  /* Suppress unused warning */
-    caught_sighup = 1;
-}
-
-/* Handle exit requests by SIGTERM and SIGINT */
+/* Signal handlers: just set a variable and return */
+static volatile sig_atomic_t reload_signal = 0;
 static volatile sig_atomic_t exit_signal = 0;
+
 static void handle_exit(int sig)
 {
     exit_signal = sig;
 }
+static void handle_reload(int sig)
+{
+    reload_signal = sig;
+}
+
 
 /* Handle timeout signal or timeout event */
 static void timer(int sig)
@@ -188,12 +190,26 @@ static void tftpd_log_stderr(int priority, const char *fmt, ...)
     putc('\n', stderr);
 }
 
-log_func tftpd_log = tftpd_log_stderr;
-
-static void tftpd_openlog(const char *ident, int option, int facility)
+static void tftpd_reopenlog_stderr(void)
 {
-    openlog(ident, option, facility);
+    fflush(stderr);             /* Should normally be a noop */
+}
+
+log_func tftpd_log = tftpd_log_stderr;
+static void (*tftpd_reopenlog)(void) = tftpd_reopenlog_stderr;
+
+static void tftpd_openlog(void);
+
+static void tftpd_reopenlog_syslog(void)
+{
+    closelog();
+    tftpd_openlog();
+}
+static void tftpd_openlog(void)
+{
+    openlog(_progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
     tftpd_log = syslog;
+    tftpd_reopenlog = tftpd_reopenlog_syslog;
 }
 
 #ifdef WITH_REGEX
@@ -379,7 +395,7 @@ int main(int argc, char **argv)
     int c;
     int setrv;
     int die;
-    intmax_t waittime = 900000000; /* Default us to wait for a connect */
+    intmax_t waittime = -1;      /* No waittime specified (yet) */
     const char *user = "nobody";   /* Default user */
     char *ep;
     int use_stderr = 0;
@@ -589,7 +605,6 @@ int main(int argc, char **argv)
             use_stderr = 1;
             break;
         case OPT_SYSTEMD:
-            standalone = 1;
             nodaemon = 1;
             systemd = 1;
             break;
@@ -607,7 +622,7 @@ int main(int argc, char **argv)
         }
 
     if (!use_stderr)
-        tftpd_openlog(_progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
+        tftpd_openlog();
 
 #ifdef WITH_REGEX
     if (rewrite_file)
@@ -673,20 +688,30 @@ int main(int argc, char **argv)
     }
 
     /*
+     * If no wait time is specified, set it to infinite if
+     * standalone, otherwise to DEFAULT_WAITTIME.
+     *
+     * If a wait time of 0 is specified, set it to infinite.
+     */
+    if (waittime < 0)
+        waittime = standalone ? -1 : DEFAULT_WAITTIME;
+    else if (!waittime)
+        waittime = -1;
+
+    /*
      * If we're running standalone, open the listening sockets,
      * daemonize the process and add a pid file if requested.
      */
-    if (standalone) {
+    if (standalone || systemd) {
         struct liststr *ls;
-        FILE *pf;
 
         if (systemd) {
             int startfd = 3;    /* Fixed by systemd protocol */
             long nfds = getenv_ulong("LISTEN_FDS");
             long listen_pid = getenv_ulong("LISTEN_PID");
 
-            if (!strlist_isempty(&listen_addrs)) {
-                tftpd_log(LOG_ERR, "--address and --systemd are mutually exclusive");
+            if (standalone) {
+                tftpd_log(LOG_ERR, "--systemd is mutually exclusive with the --address, --standalone and --foreground options");
                 exit(EX_USAGE);
             }
 
@@ -720,20 +745,6 @@ int main(int argc, char **argv)
             tftpd_log(LOG_ERR, "cannot daemonize: %m");
             exit(EX_OSERR);
         }
-        set_signal(SIGTERM, handle_exit, 0);
-        set_signal(SIGINT,  handle_exit, 0);
-        if (pidfile) {
-            pf = fopen (pidfile, "w");
-            if (!pf) {
-                tftpd_log(LOG_ERR, "cannot open pid file '%s' for writing: %m", pidfile);
-                pidfile = NULL;
-            } else {
-                if (fprintf(pf, "%d\n", getpid()) < 0)
-                    tftpd_log(LOG_ERR, "error writing pid file '%s': %m", pidfile);
-                if (fclose(pf))
-                    tftpd_log(LOG_ERR, "error closing pid file '%s': %m", pidfile);
-            }
-        }
     } else {
         if (pollset_isempty(listen_set)) {
             /*
@@ -754,6 +765,20 @@ int main(int argc, char **argv)
     if (!use_stderr)
         dup2(nullfd, 2);
 
+    if (pidfile) {
+        FILE *pf = fopen(pidfile, "w");
+        if (!pf) {
+            tftpd_log(LOG_ERR, "cannot open pid file '%s' for writing: %m", pidfile);
+            pidfile = NULL;
+        } else {
+            bool err = fprintf(pf, "%d\n", getpid()) < 0;
+            err |= ferror(pf);
+            err |= fclose(pf);
+            if (err)
+                tftpd_log(LOG_ERR, "error writing pid file '%s': %m", pidfile);
+        }
+    }
+
     cursor = 0;
     while ((fd = pollset_next(listen_set, &cursor, NULL)) >= 0) {
         tftpd_config_socket(fd, 0);
@@ -761,16 +786,18 @@ int main(int argc, char **argv)
     }
 
     /* This means we don't want to wait() for children */
-#ifdef SA_NOCLDWAIT
-    set_signal(SIGCHLD, SIG_IGN, SA_NOCLDSTOP | SA_NOCLDWAIT);
-#else
-    set_signal(SIGCHLD, SIG_IGN, SA_NOCLDSTOP);
+#ifndef SA_NOCLDWAIT
+#define SA_NOCLDWAIT 0
 #endif
+    set_signal(SIGCHLD, SIG_IGN, SA_NOCLDSTOP | SA_NOCLDWAIT);
 
-    /* Take SIGHUP and use it to set a variable.  This
-       is polled synchronously to make sure we don't
-       lose packets as a result. */
-    set_signal(SIGHUP, handle_sighup, 0);
+    /*
+     * These signals are handled synchronously: the handler simply
+     * sets a flag, and expect pollset_poll() to return EINTR.
+     */
+    set_signal(SIGHUP,  standalone ? handle_reload : handle_exit, 0);
+    set_signal(SIGTERM, handle_exit, 0);
+    set_signal(SIGINT,  handle_exit, 0);
 
     if (spec_umask || !unixperms)
         umask(my_umask);
@@ -779,7 +806,7 @@ int main(int argc, char **argv)
         int what;
         int rv;
 
-        if (exit_signal) { /* happens in standalone mode only */
+        if (exit_signal) {
             if (pidfile && unlink(pidfile)) {
                 tftpd_log(LOG_WARNING, "error removing pid file '%s': %m", pidfile);
                 exit(EX_OSERR);
@@ -788,24 +815,13 @@ int main(int argc, char **argv)
             }
 	}
 
-        if (caught_sighup) {
-            caught_sighup = 0;
-            if (standalone) {
-#ifdef WITH_REGEX
-                if (rewrite_file) {
-                    freerules(rewrite_rules);
-                    rewrite_rules = read_remap_rules(rewrite_file);
-                }
-#endif
-            } else {
-                /* Return to inetd for respawn */
-                exit(0);
+        if (reload_signal) {
+            reload_signal = 0;
+            if (rewrite_file) {
+                freerules(rewrite_rules);
+                rewrite_rules = read_remap_rules(rewrite_file);
             }
         }
-
-        /* Never time out if we're in standalone mode */
-        if (standalone)
-            waittime = -1;
 
         rv = pollset_poll(listen_set, POLLSET_IN, waittime);
         if (rv == -1 && errno == EINTR)
@@ -894,17 +910,16 @@ int main(int argc, char **argv)
 
     /* Child process: handle the actual request here */
 
-    /* Ignore SIGHUP */
-    set_signal(SIGHUP, SIG_IGN, 0);
+    /* Ignore SIGHUP; make SIGTERM and SIGINT kill the process */
+    set_signal(SIGHUP,  SIG_IGN, 0);
+    set_signal(SIGTERM, SIG_DFL, 0);
+    set_signal(SIGINT,  SIG_DFL, 0);
 
     /* Make sure the log socket is still connected.  This has to be
-       done before the chroot, while /dev/log is still accessible.
-       When not running standalone, there is little chance that the
-       tftpd_log daemon gets restarted by the time we get here. */
-    if (secure && standalone) {
-        closelog();
-        openlog(_progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
-    }
+       done before the chroot, while /dev/log is still accessible,
+       so depending on the automatic re-opening by syslog() is unsafe. */
+    if (secure)
+        tftpd_reopenlog();
 
     /* Close file descriptors we don't need */
     close_listen_set();

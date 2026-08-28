@@ -13,6 +13,14 @@ Changes in 6.0:
 	so this should only affect a small number of users in the
 	first place.
 
+	The --timeout option is now also supported when running
+	standalone.
+
+	The --pidfile option is now also supported when not running
+	standalone.
+
+	Fix the --stderr option with --secure.
+
 
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to

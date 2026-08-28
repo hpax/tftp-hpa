@@ -9,55 +9,66 @@
 .\"
 .\"----------------------------------------------------------------------- */
 .TH TFTPD 8 "27 August 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
+
 .SH NAME
 .B tftpd
 \- Trivial File Transfer Protocol server
+
 .SH SYNOPSIS
 .B in.tftpd
 .RI [ options... ]
 .I directory...
+
 .SH DESCRIPTION
 .B tftpd
-is a server for the Trivial File Transfer Protocol.  The TFTP
-protocol is extensively used to support remote booting of diskless
-devices.  The server is normally started by
-.BR inetd ,
-but can also run standalone.
-.PP
+is a server for the Trivial File Transfer Protocol.  The TFTP protocol
+is extensively used to support remote booting of diskless devices.
+The server can be run as a standalone daemon or it can be started by
+.MR inetd 8 ,
+.MR xinetd 8 ,
+or
+.MR systemd 1 .
+
 .SH OPTIONS
+.PP
+Some options are configurable at compile time and may not be available
+on any one specific system. Run
+.B tftpd
+with the
+.B \-V
+option to see which specific options are available on your system.
 .TP
-\fB\-\-ipv4\fP, \fB\-4\fP
+\fB\-4\fP, \fB\-\-ipv4\fP
 Connect with IPv4 only, even if IPv6 support was compiled in.
 .TP
-\fB\-\-ipv6\fP, \fB\-6\fP
+\fB\-6\fP, \fB\-\-ipv6\fP
 Connect with IPv6 only, if compiled in.
 .TP
 \fB\-l\fP, \fB\-\-listen\fP
 Run the server in standalone (listen) mode, rather than run from
-.BR inetd .
-In listen mode, the
-.B \-\-timeout
-option is ignored, and the
+a service daemon. In standalone mode, the
 .B \-\-address
 option can be used to specify a specific local address or port to
-listen to.
+listen to and the
+.B \-\-port
+can be used to specify a default listen port.
 .TP
-\fB\-\-foreground\fP, \fB\-L\fP
+\fB\-L\fP, \fB\-\-foreground\fP
 Similar to
 .B \-\-listen
 but do not detach from the foreground process.  Implies
 .BR \-\-listen .
 .TP
-\fB\-\-address\fP \fI[address][:port]\fP, \fB\-a\fP \fI[address][:port]\fP
+\fB\-a\fP, \fB\-\-address\fP \fI[address][:port]\fP
 Specify a specific
 .I address
 and
 .I port
-to listen to when called with the
+to listen to when running in standalone mode (with the
 .B \-\-listen
 or
 .B \-\-foreground
-option. Numeric IPv6 adresses must be enclosed in square brackets
+options.) Numeric IPv6 adresses must be enclosed in square brackets
 to avoid ambiguity with the optional
 .I port
 information.
@@ -67,12 +78,12 @@ If no
 is specified, the default is to listen to all local addresses.
 .IP
 .I port
-can be either a decimal number or a service name specified in the
+can be either a decimal number between 1 and 65535, or a service name
+specified in the
 .MR services 5
 database. If no
 .I port
-is specified, the default is the port given by the "tftp"
-service name, unless overridden by the
+is specified, the default is used; see the
 .B \-\-service
 option.
 .IP
@@ -84,12 +95,17 @@ is a host name that resolves to multiple addresses,
 .B tftpd
 will bind to all of them.
 .TP
-\fB\-\-service\fP \fIport\fP, \fB\-\-port\fP \fIport\fP, \fB\-S\fP \fIport\fP
-Specify the port/service name to use for addresses where no
+\fB\-S\fP, \fB\-\-service\fP, \fB\-\-port\fP \fIport\fP
+Specify the port/service name to use in standalone mode unless a
 .I port
-is specified. The default is "tftp".
+is explicitly specified in the
+.B \-\-address option. Regardless of which name is used for the option, the
+.I port
+can be either a decimal number or a service name specified in the
+.MR services 5
+database. The default is "tftp".
 .TP
-\fB\-\-create\fP, \fB\-c\fP
+\fB\-c\fP, \fB\-\-create\fP
 Allow new files to be created.  By default,
 .B tftpd
 will only allow upload of files that already exist.  Files are created
@@ -100,7 +116,7 @@ or
 .B \-\-umask
 options are specified.
 .TP
-\fB\-\-secure\fP, \fB\-\-chroot\fP, \fB\-s\fP
+\fB\-s\fP, \fB\-\-secure\fP, \fB\-\-chroot\fP
 Change root directory on startup using
 .MR chroot 2 .
 This means the remote host does not
@@ -119,7 +135,7 @@ described under
 below are performed; any desired checks will have to be implemented
 using explicit remap rules.
 .TP
-\fB\-\-user\fP \fIusername\fP, \fB\-u\fP \fIusername\fP
+\fB\-u\fP, \fB\-\-user\fP \fIusername\fP
 Specify the username which
 .B tftpd
 will run as; the default is "nobody".  The user ID, group ID, and (if
@@ -127,49 +143,50 @@ possible on the platform) the supplementary group IDs will be set to
 the ones specified in the system permission database for this
 username.
 .TP
-\fB\-\-umask\fP \fIumask\fP, \fB\-U\fP \fIumask\fP
+\fB\-U\fP, \fB\-\-umask\fP \fIumask\fP
 Sets the \fIumask\fP for newly created files to the specified value.
 The default is zero (anyone can read or write) if the
 .B \-\-permissive
 option is not specified, or inherited from the invoking process if
 .B \-\-permissive
 is specified.
+.IP
+See
+.MR umask 2 .
 .TP
-\fB\-\-permissive\fP, \fB\-p\fP
+\fB\-p\fP, \fB\-\-permissive\fP
 Perform no additional permissions checks above the normal
 system-provided access controls for the user specified via the
 .B \-\-user
 option.
 .TP
-\fB\-\-pidfile\fP \fIpidfile\fP, \fB\-P\fP \fIpidfile\fP
+\fB\-P\fP, \fB\-\-pidfile\fP \fIpidfile\fP
 When run in standalone mode, write the process ID of the listening
-server into \fIpidfile\fP.  On normal termination (SIGTERM or SIGINT)
-the pid file is automatically removed.
+server into \fIpidfile\fP.  On normal termination (SIGTERM, SIGINT, or
+inactivity timeout) the pid file is automatically removed.
 .TP
-\fB\-\-timeout\fP \fItimeout\fP, \fB\-t\fP \fItimeout\fP
-When run from
-.B inetd
-this specifies how long, in seconds, to wait for a second connection
-before terminating the server.
-.B inetd
-will then respawn the server when another request comes in.  The
-default is 900 (15 minutes.)
+\fB\-t\fP, \fB\-\-timeout\fP \fItimeout\fP
+How long, in seconds, to wait for a connection before terminating the
+server. Typically when run from a service daemon, the service daemon
+will then respawn the server if a new connection arrives.
+.IP
+The default is 0 (unlimited) if run standalone, otherwise 900 (15 minutes.)
 .TP
-\fB\-\-retransmit\fP \fItimeout, \fP\fB\-T\fP \fItimeout\fP
-Determine the default timeout, in microseconds, before the first
-packet is retransmitted.  This can be modified by the client if the
+\fP\fB\-T\fP, \fB\-\-retransmit\fP \fItimeout\fP
+Determine the default packet timeout, in microseconds, before a packet
+is retransmitted.  This can be modified by the client if the
 .B timeout
 or
 .B utimeout
 option is negotiated.  The default is 1000000 (1 second.)
+.IP
+For subsequent retransmissions, the
 .TP
-\fB\-\-map-file\fP \fIremap-file\fP, \fB\-m\fP \fIremap-file\fP
+\fB\-m\fP, \fB\-\-map-file\fP \fIremap-file\fP
 Specify the use of filename remapping.  The
 .I remap-file
-is a file containing the remapping rules.  See the section on filename
-remapping below.  This option may not be compiled in, see the output of
-.B "in.tftpd \-V"
-to verify whether or not it is available.
+is a file containing the remapping rules, if compiled in.
+See the section on filename remapping below.
 .TP
 \fB\-\-map-steps\fP \fIsteps\fP
 Specify the number of remapping rules that may be executed before the
@@ -193,19 +210,25 @@ options to simulate an IPv4 or IPv6 client. If
 is included on the command line, simulate a PUT (WRQ) request,
 otherwise simulate a GET (RRQ) request.
 .TP
-\fB\-\-verbose\fP, \fB\-v\fP
+\fB\-v\fP, \fB\-\-verbose\fP
 Increase the logging verbosity of
 .BR tftpd .
 This flag can be specified multiple times for even higher verbosity.
 .TP
 \fB\-\-verbosity\fP \fIvalue\fP
-Set the verbosity value to \fIvalue\fP.
+Set the verbosity value to \fIvalue\fP. This is equivalent to
+specifying the
+.B \-v
+option
+.I value
+times.
 .TP
-\fB\-\-refuse\fP \fItftp-option\fP, \fB\-r\fP \fItftp-option\fP
+\fB\-r\fP, \fB\-\-refuse\fP \fItftp-option\fP
 Indicate that a specific RFC 2347 TFTP option should never be
-accepted.
+accepted, even if requested by the client. This can be used to work
+around broken clients.
 .TP
-\fB\-\-blocksize\fP \fImax-block-size\fP, \fB\-B\fP \fImax-block-size\fP
+\fB\-B\fP, \fB\-\-blocksize\fP \fImax-block-size\fP
 Specifies the maximum permitted block size.  The permitted range for
 this parameter is from 512 to 65464.  Some embedded clients request
 large block sizes and yet do not handle fragmented packets correctly;
@@ -214,7 +237,7 @@ MTU on your network minus 32 bytes (20 bytes for IP, 8 for UDP, and 4
 for TFTP; less if you use IP options on your network.)  For example,
 on a standard Ethernet (MTU 1500) a value of 1468 is reasonable.
 .TP
-\fB\-\-windowsize\fP \fImax-window-size\fP, \fB\-W\fP \fImax-window-size\fP
+\fB\-W\fP, \fB\-\-windowsize\fP \fImax-window-size\fP
 Specifies the maximum accepted RFC 7440 \fBwindowsize\fP option value.
 The permitted range is from 1 to 32768. A client request exceeding
 this limit is reduced to this value.  If the resulting window is one
@@ -234,9 +257,16 @@ instead of returning a \fBwindowsize\fP option.
 The compile-time default is set by the \fBTFTPD_MAX_WINDOWBYTES\fP
 configure variable) and defaults to 4194304 (4 MiB).
 .TP
-\fB\-\-port-range\fP \fIport:port\fP, \fB\-R\fP \fIport:port\fP
+\fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
 Force the server port number (the Transaction ID) to be in the
-specified range of port numbers.
+specified range of port numbers. This can be used to make filewall
+rules or packet tracing easier.
+.IP
+The
+.I min-port
+and
+.I max-port
+values must be decimal numbers between 1 and 65535.
 .TP
 \fB\-\-systemd\fP
 Use
@@ -246,12 +276,21 @@ socket activation. This option is only used in a
 unit file. See
 .MR systemd.socket 5 .
 .IP
-Implies
-.BR \-\-foreground .
+This also makes the
+.B tftpd
+process run in the foreground, as if the
+.B \-\-foreground
+option had been specified, but unlike the
+.B \-\-foreground
+option it does not change the default for the
+.B \-\-timeout
+option.
 .TP
-\fB\-\-version\fP, \fB\-V\fP
+\fB\-V\fP, \fB\-\-version\fP
 Print the version number and configuration to standard output, then
-exit gracefully.
+exit gracefully. No daemon process is started and no listening sockets
+are set up.
+
 .SH "RFC 2347 OPTION NEGOTIATION"
 This version of
 .B tftpd
@@ -277,7 +316,9 @@ version of
 .B tftpd
 only supports the
 .B tsize
-option for binary (octet) mode transfers.
+option for binary (octet) mode transfers. The
+.B tsize
+option is accepted but ignored for upload (write) transactions.
 .TP
 \fBtimeout\fP (RFC 2349)
 Set the time before the server retransmits a packet, in seconds.
@@ -287,12 +328,17 @@ Set the time before the server retransmits a packet, in microseconds.
 .TP
 \fBwindowsize\fP (RFC 7440)
 Set the number of data blocks sent before an acknowledgment is required.
-Values from 1 through 64 are supported.  A window is retransmitted if its
-acknowledgment is not received.
+The maximum value is set by the
+.B \-\-windowsize
+and
+.B \-\-window-bytes
+options.  A window can be retransmitted in whole or in part depending
+on the specific acknowledgement packets received from the client.
 .TP
 \fBrollover\fP (nonstandard)
 Set the block number to resume at after a block number rollover.  The
-default and recommended value is zero.
+default and recommended value is 0, but some clients expect another
+value, typically 1.
 .PP
 The
 .B \-\-refuse
@@ -302,6 +348,7 @@ example, some TFTP clients have been found to request the
 .B blksize
 option, but crash with an error if they actually get the option
 accepted by the server.
+
 .SH "FILENAME REMAPPING"
 The
 .B \-\-map-file
@@ -471,6 +518,7 @@ If the mapping file is changed, you need to send
 to any outstanding
 .B tftpd
 process.
+
 .SH "SECURITY"
 The use of TFTP services does not require an account or password on
 the server system.  Due to the lack of authentication information,
@@ -484,20 +532,16 @@ option is specified.  Note that this extends the concept of ``public''
 to include all users on all hosts that can be reached through the
 network; this may not be appropriate on all systems, and its
 implications should be considered before enabling TFTP service.
-Typically, some kind of firewall or packet-filter solution should be
-employed.  If appropriately compiled (see the output of
-.BR  "in.tftpd \-\-version" )
-.B tftpd
-will query the
-.BR hosts_access (5)
-database for access control information.  This may be slow; sites
-requiring maximum performance may want to compile without this option
-and rely on firewalling or kernel-based packet filters instead.
+.PP
+It is strongly recommended to use some kind of firewall or
+packet-filter solution to restrict access to the TFTP port. TFTP only
+uses the TFTP port itself for the initial (request) packet, and so the
+cost of such a filter is neglible.
 .PP
 The server should be set to run as the user with the lowest possible
 privilege; please see the
 .B \-\-user
-flag.  It is probably a good idea to set up a specific user account for
+flag.  It is strongly recommended to set up a specific user account for
 .BR tftpd ,
 rather than letting it run as "nobody", to guard against privilege
 leaks between applications.
@@ -517,6 +561,7 @@ permissions as well handle nonstandard path names requested by
 clients, such as Windows clients expecting to be able to use
 .B \(rs
 as path separators.
+
 .SH "PATH VALIDATION"
 If the
 .B \-\-secure
@@ -560,6 +605,7 @@ When
 is used, no path validation is performed by
 .B tftpd
 itself.
+
 .SH "CONFORMING TO"
 RFC 1123,
 .IR "Requirements for Internet Hosts \- Application and Support" .
@@ -578,18 +624,21 @@ RFC 2349,
 .br
 RFC 7440,
 .IR "TFTP Windowsize Option"
+
 .SH "AUTHOR"
 This version of
 .B tftpd
 is maintained by H. Peter Anvin <hpa@zytor.com>.  It was derived from,
 but has substantially diverged from, an OpenBSD source base, with
 added patches by Markus Gutschke and Gero Kulhman.
+
 .SH "SEE ALSO"
 .MR tftp 1 ,
 .MR chroot 2 ,
 .MR umask 2 ,
-.MR hosts_access 5 ,
 .MR services 5 ,
 .MR systemd.socket 5 ,
+.MR systemd.unit 5 ,
 .MR regex 7 ,
-.MR inetd 8 .
+.MR inetd 8 ,
+.MR xinetd 8 .
