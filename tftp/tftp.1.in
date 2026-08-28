@@ -55,7 +55,7 @@ Request the RFC 2348 \fBblksize\fP option.  This requests data blocks up
 to \fIblock-size\fP bytes; valid values are 8 through 65464.  The default
 does not request the option.
 .TP
-\fB\-w\fP \fIwindow-size\fP
+\fB\-W\fP, \fB\-w\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option.  This permits up to
 \fIwindow-size\fP data blocks to be sent before an acknowledgment is
 required.  Valid values are 1 through 64.  The default does not request
@@ -126,7 +126,7 @@ future transfers.  Enable
 mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
 .TP
 .B literal
-Toggle literal mode.  When set, this mode prevents special treatment of ':' in filenames. 
+Toggle literal mode.  When set, this mode prevents special treatment of ':' in filenames.
 .TP
 \fBmode\fP \fItransfer-mode\fP
 Specify the mode for transfers;

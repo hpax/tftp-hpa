@@ -266,6 +266,7 @@ int main(int argc, char *argv[])
                     blocksize = (unsigned int)value;
                     break;
                 }
+                case 'W':
                 case 'w':
                 {
                     char *end;
