@@ -18,6 +18,9 @@ TESTROOT=$(mktemp -d)
 TEST_DIR="$TESTROOT/client"
 SERVER_DIR="$TESTROOT/server"
 PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
+TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
+TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-199 512 1468 9001}"
+
 mkdir -p "$TEST_DIR" "$SERVER_DIR"
 
 trap 'cleanup' EXIT INT TERM
@@ -160,7 +163,7 @@ create_test_files() {
 # Test file download (client receives)
 test_download() {
     local filename="$1"
-    local -a tftp_options=(-w $WINSIZE "${@:2}")
+    local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
 
     print_info "Testing download: $filename"
 
@@ -195,7 +198,7 @@ test_download() {
 # Test file upload (client sends)
 test_upload() {
     local filename="$1"
-    local -a tftp_options=(-w $WINSIZE "${@:2}")
+    local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
 
     print_info "Testing upload: $filename"
 
@@ -250,31 +253,39 @@ main() {
 			window-boundary.bin large.bin)
 
     # The largest supported client window exercises the threaded packet ring.
-    for WINSIZE in ${TFTP_TEST_WINSIZES:-1 4 64}; do
-	for LOCALHOST in $LOCALHOSTS; do
-	    # Clear test directory of any previously downloaded files
-	    rm -f "$TEST_DIR"/*.downloaded
+    for BLKSIZE in $TFTP_TEST_BLKSIZES; do
+	for WINSIZE in $TFTP_TEST_WINSIZES; do
+	    for LOCALHOST in $LOCALHOSTS; do
+		print_info "---------------------"
+		print_info "Block size:  $BLKSIZE"
+		print_info "Window size: $WINSIZE"
+		print_info "IP address:  $LOCALHOST"
+		print_info "---------------------"
 
-	    print_info "Running download tests, window size $WINSIZE, address $LOCALHOST..."
-	    for testfile in "${testfiles[@]}"; do
-		if test_download $testfile; then
-		    ((tests_passed++))
-		else
-		    ((tests_failed++))
-		fi
-	    done
+		# Clear test directory of any previously downloaded files
+		rm -f "$TEST_DIR"/*.downloaded
 
-	    # Clear server directory of downloaded test files
-	    rm -f "$SERVER_DIR"/*
+		print_info "Running download tests..."
+		for testfile in "${testfiles[@]}"; do
+		    if test_download $testfile; then
+			((tests_passed++))
+		    else
+			((tests_failed++))
+		    fi
+		done
 
-	    print_info "Running upload tests, window size $WINSIZE, address $LOCALHOST..."
+		# Clear server directory of downloaded test files
+		rm -f "$SERVER_DIR"/*
 
-	    for testfile in "${testfiles[@]}"; do
-		if test_upload $testfile; then
-		    ((tests_passed++))
-		else
-		    ((tests_failed++))
-		fi
+		print_info "Running upload tests..."
+
+		for testfile in "${testfiles[@]}"; do
+		    if test_upload $testfile; then
+			((tests_passed++))
+		    else
+			((tests_failed++))
+		    fi
+		done
 	    done
 	done
     done
