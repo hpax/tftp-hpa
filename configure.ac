@@ -189,6 +189,24 @@ common_libs="$LIBS"
 
 AC_CHECK_DECLS(IPPORT_TFTP)
 
+AC_ARG_VAR([TFTPD_MAX_WINDOWSIZE],
+ [maximum RFC 7440 windowsize accepted by tftpd (default: 256)])
+AS_IF([test -z "$TFTPD_MAX_WINDOWSIZE"], [TFTPD_MAX_WINDOWSIZE=256])
+AS_CASE([$TFTPD_MAX_WINDOWSIZE],
+ [*[!0-9]*|''], [AC_MSG_ERROR([TFTPD_MAX_WINDOWSIZE must be a positive integer])])
+AS_IF([test "$TFTPD_MAX_WINDOWSIZE" -lt 1 || test "$TFTPD_MAX_WINDOWSIZE" -gt 32768],
+ [AC_MSG_ERROR([TFTPD_MAX_WINDOWSIZE must be in the range 1-32768])])
+AC_DEFINE_UNQUOTED([MAX_WINDOWSIZE], [$TFTPD_MAX_WINDOWSIZE],
+ [maximum RFC 7440 windowsize accepted by tftpd])
+
+AC_ARG_VAR([TFTPD_MAX_WINDOWBYTES],
+ [maximum bytes in an RFC 7440 tftpd window; 0 is unlimited (default: 4194304)])
+AS_IF([test -z "$TFTPD_MAX_WINDOWBYTES"], [TFTPD_MAX_WINDOWBYTES=4194304])
+AS_CASE([$TFTPD_MAX_WINDOWBYTES],
+ [*[!0-9]*|''], [AC_MSG_ERROR([TFTPD_MAX_WINDOWBYTES must be a nonnegative integer])])
+AC_DEFINE_UNQUOTED([MAX_WINDOWBYTES], [$TFTPD_MAX_WINDOWBYTES],
+ [maximum bytes in an RFC 7440 tftpd window; zero is unlimited])
+
 PA_ARG_DISABLED([tcpwrappers],
   [disable tcpwrapper permissions checking], [],
   [

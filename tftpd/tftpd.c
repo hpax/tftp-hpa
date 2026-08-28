@@ -61,10 +61,23 @@ static sigjmp_buf timeoutbuf;
 static uint16_t rollover_val = 0;
 
 #define	PKTSIZE	MAX_SEGSIZE+4
+#define MAX_MAX_WINDOWSIZE	32768	/* More than this gets dangerous */
+#ifndef MAX_WINDOWSIZE
+# define MAX_WINDOWSIZE		MAX_MAX_WINDOWSIZE
+#endif
+#ifndef MAX_WINDOWBYTES
+# define MAX_WINDOWBYTES 0
+#endif
+#if MAX_WINDOWSIZE < 1
+# error MAX_WINDOWSIZE must be at least 1
+#endif
 static char buf[PKTSIZE];
 static char ackbuf[PKTSIZE];
 static unsigned int max_blksize = MAX_SEGSIZE;
+static unsigned int max_windowsize = MAX_WINDOWSIZE;
+static uintmax_t max_windowbytes = MAX_WINDOWBYTES;
 static unsigned int windowsize = 1;
+static uintmax_t requested_windowsize;
 
 static char tmpbuf[INET6_ADDRSTRLEN], *tmp_p;
 
@@ -93,6 +106,7 @@ int tftp(struct tftphdr *, int);
 static void nak(int, const char *);
 static void timer(int);
 static void do_opt(const char *, const char *, char **);
+static void negotiate_windowsize(char **);
 
 static int set_blksize(uintmax_t *);
 static int set_blksize2(uintmax_t *);
@@ -303,7 +317,8 @@ enum long_only_options {
     OPT_STDERR,
     OPT_MAP_TEST,
     OPT_MAP_STEPS,
-    OPT_SYSTEMD
+    OPT_SYSTEMD,
+    OPT_WINDOW_BYTES
 };
 
 static struct option long_options[] = {
@@ -320,6 +335,8 @@ static struct option long_options[] = {
     { "foreground",  0, NULL, 'L' },
     { "address",     1, NULL, 'a' },
     { "blocksize",   1, NULL, 'B' },
+    { "windowsize",  1, NULL, 'W' },
+    { "window-bytes", 1, NULL, OPT_WINDOW_BYTES },
     { "user",        1, NULL, 'u' },
     { "umask",       1, NULL, 'U' },
     { "refuse",      1, NULL, 'r' },
@@ -337,7 +354,7 @@ static struct option long_options[] = {
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { NULL, 0, NULL, 0 }
 };
-static const char short_options[] = "46cspvVlLa:B:u:U:r:t:T:R:S:m:P:";
+static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
 
 static struct pollset *listen_set;
 
@@ -454,6 +471,42 @@ int main(int argc, char **argv)
                     tftpd_log(LOG_ERR,
                            "Bad maximum blocksize value (range 512-%d): %s",
                            MAX_SEGSIZE, optarg);
+                    exit(EX_USAGE);
+                }
+            }
+            break;
+        case 'W':
+            {
+                char *vp;
+                long value = strtol(optarg, &vp, 10);
+
+                if (*optarg == '\0' || *vp || value < 0) {
+                    tftpd_log(LOG_ERR,
+                              "Invalid maximum windowsize value: %s\n", optarg);
+                    exit(EX_USAGE);
+                }
+
+                if (value < 1) {
+                    /* Treat -W 0 as -W 1 */
+                    value = 1;
+                } else if (value > MAX_MAX_WINDOWSIZE) {
+                    value = MAX_MAX_WINDOWSIZE;
+                    tftpd_log(LOG_WARNING,
+                              "Bad maximum windowsize value: %s "
+                              "(valid range 1-%u, capping at %ld)",
+                              optarg, (unsigned int)MAX_MAX_WINDOWSIZE, value);
+                }
+                max_windowsize = (unsigned int)value;
+            }
+            break;
+        case OPT_WINDOW_BYTES:
+            {
+                char *vp;
+
+                errno = 0;
+                max_windowbytes = strtoumax(optarg, &vp, 10);
+                if (errno || *optarg == '\0' || *vp) {
+                    tftpd_log(LOG_ERR, "Bad window-bytes value: %s", optarg);
                     exit(EX_USAGE);
                 }
             }
@@ -1008,6 +1061,7 @@ int tftp(struct tftphdr *tp, int size)
 
     ((struct tftphdr *)ackbuf)->th_opcode = htons(OACK);
     windowsize = 1;
+    requested_windowsize = 0;
 
     origfilename = cp = (char *)&(tp->th_stuff);
     argn = 0;
@@ -1088,6 +1142,8 @@ int tftp(struct tftphdr *tp, int size)
         nak(EBADOP, "Missing mode");
         exit(0);
     }
+
+    negotiate_windowsize(&ap);
 
     if (ap != (ackbuf + 2)) {
         if (tp_opcode == WRQ)
@@ -1174,13 +1230,53 @@ static int set_rollover(uintmax_t *vp)
  * (RFC 7440).  Limit this to the same conservative value exposed by
  * the client.
  */
+#define OPTBUFSIZE	(sizeof(uintmax_t) * CHAR_BIT / 3 + 3)
+
 static int set_windowsize(uintmax_t *vp)
 {
-    if (*vp < 1 || *vp > 64)
+    if (*vp < 1)
         return 0;
 
-    windowsize = (unsigned int)*vp;
+    requested_windowsize = *vp;
+
     return 1;
+}
+
+/*
+ * windowsize depends on the negotiated block size, which can appear in
+ * either order in an RFC 2347 request.  Add it to the OACK only after all
+ * request options have been processed.
+ */
+static void negotiate_windowsize(char **ap)
+{
+    uintmax_t window;
+    char retbuf[OPTBUFSIZE];
+    size_t optlen, retlen;
+
+    if (!requested_windowsize)
+        return;
+
+    window = requested_windowsize;
+    if (window > max_windowsize)
+        window = max_windowsize;
+    if (max_windowbytes && window > max_windowbytes / (uintmax_t)segsize)
+        window = max_windowbytes / (uintmax_t)segsize;
+
+    if (window < 2)
+        return;
+
+    windowsize = (unsigned int)window;
+    optlen = sizeof("windowsize");
+    retlen = sprintf(retbuf, "%u", windowsize);
+    if (*ap + optlen + retlen >= ackbuf + sizeof(ackbuf)) {
+        nak(EOPTNEG, "Insufficient space for options");
+        exit(0);
+    }
+
+    memcpy(*ap, "windowsize", optlen);
+    *ap += optlen;
+    memcpy(*ap, retbuf, retlen + 1);
+    *ap += retlen + 1;
 }
 
 /*
@@ -1235,12 +1331,6 @@ static int set_utimeout(uintmax_t *vp)
 }
 
 /*
- * Conservative calculation for the size of a buffer which can hold an
- * arbitrary integer
- */
-#define OPTBUFSIZE	(sizeof(uintmax_t) * CHAR_BIT / 3 + 3)
-
-/*
  * Parse RFC2347 style options; we limit the arguments to positive
  * integers which matches all our current options.
  */
@@ -1267,6 +1357,9 @@ static void do_opt(const char *opt, const char *val, char **ap)
     for (po = options; po->o_opt; po++)
         if (!strcasecmp(po->o_opt, opt)) {
             if (po->o_fnc(&v)) {
+                if (!strcasecmp(opt, "windowsize"))
+                    break;
+
 		optlen = strlen(opt);
 		retlen = sprintf(retbuf, "%"PRIuMAX, v);
 
@@ -1605,8 +1698,9 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     }
 
     {
-        char *packets = xmalloc((size_t)windowsize * PKTSIZE);
-        int lengths[64];
+        size_t packetsize = (sizeof(*dp) + 1) & ~(size_t)1;
+        char *packets = xcalloc(windowsize, packetsize);
+        int *lengths = xcalloc(windowsize, sizeof(*lengths));
         volatile int packet_count, final;
         u_short expected_ack;
 
@@ -1622,7 +1716,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                 }
                 dp->th_opcode = htons((u_short) DATA);
                 dp->th_block = htons((u_short) block);
-                memcpy(packets + (size_t)packet_count * PKTSIZE, dp,
+                memcpy(packets + (size_t)packet_count * packetsize, dp,
                        (size_t)size + 4);
                 lengths[packet_count++] = size + 4;
                 read_ahead(file, pf->f_convert);
@@ -1636,7 +1730,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
             (void)sigsetjmp(timeoutbuf, 1);
           resend_window:
             for (n = 0; n < packet_count; n++) {
-                dp = (struct tftphdr *)(packets + (size_t)n * PKTSIZE);
+                dp = (struct tftphdr *)(packets + (size_t)n * packetsize);
                 if (send(peer, dp, lengths[n], 0) != lengths[n]) {
                     tftpd_log(LOG_WARNING, "tftpd: write: %m");
                     goto abort_packets;
@@ -1656,7 +1750,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                     goto abort_packets;
                 expected_ack = ntohs(((struct tftphdr *)
                                       (packets + (size_t)(packet_count - 1) *
-                                       PKTSIZE))->th_block);
+                                       packetsize))->th_block);
                 if (ap_opcode == ACK && ap_block == expected_ack)
                     break;
                 if (ap_opcode == ACK)
@@ -1669,6 +1763,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         }
       abort_packets:
         xfree(packets);
+        xfree(lengths);
     }
   abort:
     (void)fclose(file);

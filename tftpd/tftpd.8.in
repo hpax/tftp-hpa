@@ -8,7 +8,7 @@
 .\" Copyright 2001-2009, 2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTPD 8 "24 August 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
+.TH TFTPD 8 "27 August 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
 .SH NAME
 .B tftpd
 \- Trivial File Transfer Protocol server
@@ -213,6 +213,26 @@ for these clients, it is recommended to set this value to the smallest
 MTU on your network minus 32 bytes (20 bytes for IP, 8 for UDP, and 4
 for TFTP; less if you use IP options on your network.)  For example,
 on a standard Ethernet (MTU 1500) a value of 1468 is reasonable.
+.TP
+\fB\-\-windowsize\fP \fImax-window-size\fP, \fB\-W\fP \fImax-window-size\fP
+Specifies the maximum accepted RFC 7440 \fBwindowsize\fP option value.
+The permitted range is from 1 to 32768. A client request exceeding
+this limit is reduced to this value.  If the resulting window is one
+block, the \fBwindowsize\fP option is not returned and the transfer
+uses normal lockstep operation.
+.IP
+The compile-time default is set by the \fBTFTPD_MAX_WINDOWSIZE\fP
+configure variable and defaults to 256.
+.TP
+\fB\-\-window-bytes\fP \fImax-window-bytes\fP
+Limits the negotiated window such that the negotiated block size
+multiplied by the window size does not exceed \fImax-window-bytes\fP.
+A value of zero, the default, disables this limit.  A limit that permits
+fewer than two blocks causes the server to use normal lockstep operation
+instead of returning a \fBwindowsize\fP option.
+.IP
+The compile-time default is set by the \fBTFTPD_MAX_WINDOWBYTES\fP
+configure variable) and defaults to 4194304 (4 MiB).
 .TP
 \fB\-\-port-range\fP \fIport:port\fP, \fB\-R\fP \fIport:port\fP
 Force the server port number (the Transaction ID) to be in the
