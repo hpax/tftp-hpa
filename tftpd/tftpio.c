@@ -33,6 +33,7 @@ struct tftpio {
     pthread_mutex_t lock;
     pthread_cond_t changed;
     unsigned int slots;
+    unsigned int window;
     unsigned int packetsize;
     unsigned int head;
     unsigned int tail;
@@ -233,7 +234,7 @@ static void *writer_thread(void *arg)
 }
 
 static struct tftpio *io_start(FILE *file, int convert, unsigned int slots,
-                               unsigned int blocksize,
+                               unsigned int window, unsigned int blocksize,
                                enum io_direction direction)
 {
     struct tftpio *io;
@@ -241,12 +242,8 @@ static struct tftpio *io_start(FILE *file, int convert, unsigned int slots,
 
     io = xcalloc(1, sizeof(*io));
     io->file = file;
-    /*
-     * The read ring has one spare slot.  It preserves the current
-     * retransmission window while allowing the I/O thread to prefetch the
-     * first packet of the next window.
-     */
-    io->slots = direction == IO_READ ? slots + 1 : slots;
+    io->slots = slots;
+    io->window = window;
     io->packetsize = ((size_t)blocksize + 5) & ~(size_t)1;
     io->convert = convert;
     io->prevchar = -1;
@@ -281,10 +278,11 @@ static struct tftpio *io_start(FILE *file, int convert, unsigned int slots,
     return NULL;
 }
 
-struct tftpio *tftpio_reader_start(FILE *file, int convert, unsigned int slots,
+struct tftpio *tftpio_reader_start(FILE *file, int convert,
+                                   unsigned int window, unsigned int slots,
                                    unsigned int blocksize)
 {
-    return io_start(file, convert, slots, blocksize, IO_READ);
+    return io_start(file, convert, slots, window, blocksize, IO_READ);
 }
 
 int tftpio_reader_window(struct tftpio *io, unsigned int *count, int *final)
@@ -292,11 +290,11 @@ int tftpio_reader_window(struct tftpio *io, unsigned int *count, int *final)
     int error;
 
     pthread_mutex_lock(&io->lock);
-    while (io->count < io->slots && !io->eof && !io->error)
+    while (io->count < io->window && !io->eof && !io->error)
         pthread_cond_wait(&io->changed, &io->lock);
     error = io->error;
     if (!error) {
-        io->held = io->count < io->slots - 1 ? io->count : io->slots - 1;
+        io->held = io->count < io->window ? io->count : io->window;
         *count = io->held;
         *final = io->eof && io->held == io->count;
     }
@@ -333,9 +331,10 @@ void tftpio_reader_release(struct tftpio *io)
     pthread_mutex_unlock(&io->lock);
 }
 
-struct tftpio *tftpio_writer_start(FILE *file, int convert, unsigned int slots)
+struct tftpio *tftpio_writer_start(FILE *file, int convert,
+                                   unsigned int slots, unsigned int blocksize)
 {
-    return io_start(file, convert, slots, MAX_SEGSIZE, IO_WRITE);
+    return io_start(file, convert, slots, 0, blocksize, IO_WRITE);
 }
 
 struct tftphdr *tftpio_writer_reserve(struct tftpio *io)

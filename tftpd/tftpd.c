@@ -64,6 +64,7 @@ static sigjmp_buf timeoutbuf;
 static uint16_t rollover_val = 0;
 
 #define	PKTSIZE	MAX_SEGSIZE+4
+#define IO_RING_MAX_BYTES (256U * 1024U)
 #define MAX_MAX_WINDOWSIZE	32768	/* More than this gets dangerous */
 #ifndef MAX_WINDOWSIZE
 # define MAX_WINDOWSIZE		MAX_MAX_WINDOWSIZE
@@ -110,6 +111,9 @@ static void nak(int, const char *);
 static void timer(int);
 static void do_opt(const char *, const char *, char **);
 static void negotiate_windowsize(char **);
+#ifdef HAVE_PTHREAD
+static unsigned int io_ring_slots(void);
+#endif
 
 static int set_blksize(uintmax_t *);
 static int set_blksize2(uintmax_t *);
@@ -1282,6 +1286,31 @@ static void negotiate_windowsize(char **ap)
     *ap += retlen + 1;
 }
 
+#ifdef HAVE_PTHREAD
+/*
+ * Keep at least one full window for retransmission and at least two packet
+ * slots, and otherwise allow asynchronous I/O to run up to 256 KiB ahead.
+ * An unlimited transfer window uses the same 256 KiB practical ceiling.
+ */
+static unsigned int io_ring_slots(void)
+{
+    uintmax_t bytes = max_windowbytes;
+    uintmax_t slots;
+    size_t packetsize = ((size_t)segsize + 5) & ~(size_t)1;
+
+    if (!bytes || bytes > IO_RING_MAX_BYTES)
+        bytes = IO_RING_MAX_BYTES;
+
+    slots = bytes / packetsize;
+    if (slots < windowsize)
+        slots = windowsize;
+    if (slots < 2)
+        slots = 2;
+
+    return (unsigned int)slots;
+}
+#endif
+
 /*
  * Return a file size (c.f. RFC2349)
  * For netascii mode, we don't know the size ahead of time;
@@ -1712,7 +1741,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         static int final;
         u_short expected_ack;
 
-        io = tftpio_reader_start(file, pf->f_convert, windowsize, segsize);
+        io = tftpio_reader_start(file, pf->f_convert, windowsize,
+                                 io_ring_slots(), segsize);
         if (!io) {
             nak(-errno, NULL);
             goto abort;
@@ -1870,7 +1900,7 @@ static void tftp_recvfile(const struct formats *pf,
 
     oap = oack;
 #ifdef HAVE_PTHREAD
-    io = tftpio_writer_start(file, pf->f_convert, windowsize);
+    io = tftpio_writer_start(file, pf->f_convert, io_ring_slots(), segsize);
     if (!io) {
         nak(-errno, NULL);
         goto abort;
