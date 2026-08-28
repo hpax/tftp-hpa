@@ -26,6 +26,9 @@
 #define	TIMEOUT		5       /* secs between rexmt's */
 #define	LBUFLEN		200     /* size of input buffer */
 
+/* In theory up to 65535 is supported, but limit it for safety */
+#define TFTP_MAX_WINDOWSIZE	32768
+
 struct modes {
     const char *m_name;
     const char *m_mode;
@@ -164,13 +167,8 @@ char *tail(char *);
 static void usage(int errcode)
 {
     fprintf(stderr,
-            "Usage: %s -[vl%s][-m mode][-B block-size][-w window-size] [host [port]] [-c command...]\n",
-#ifdef HAVE_IPV6
-            "46",
-#else
-            "4",
-#endif
-            _progname);
+            "Usage: %s -[vl4%s][-m mode][-B block-size][-W window-size] [host [port]] [-c command...]\n",
+            _progname, WITH_IPV6 ? "6" : "");
     exit(errcode);
 }
 
@@ -241,6 +239,7 @@ int main(int argc, char *argv[])
                     if (sscanf
                         (argv[arg], "%u:%u", &portrange_from,
                          &portrange_to) != 2
+                        || !portrange_from
                         || portrange_from > portrange_to
                         || portrange_to > 65535) {
                         fprintf(stderr, "Bad port range: %s\n", argv[arg]);
@@ -277,9 +276,9 @@ int main(int argc, char *argv[])
                     errno = 0;
                     value = strtoul(argv[arg], &end, 10);
                     if (errno || *argv[arg] == '\0' || *end ||
-                        value < 1 || value > 64) {
-                        fprintf(stderr, "Bad window size: %s (1-64)\n",
-                                argv[arg]);
+                        value < 1 || value > TFTP_MAX_WINDOWSIZE) {
+                        fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
+                                argv[arg], TFTP_MAX_WINDOWSIZE);
                         exit(EX_USAGE);
                     }
                     windowsize = (unsigned int)value;

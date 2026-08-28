@@ -390,6 +390,13 @@ const char *gai_strerror(int);
 const char *inet_ntop(int, const void *, char *, socklen_t);
 #endif
 
+/* HAVE_IPV6 as a boolean */
+#ifdef HAVE_IPV6
+# define WITH_IPV6 1
+#else
+# define WITH_IPV6 0
+#endif
+
 /* tftp-hpa version and configuration strings */
 
 #include "version.h"
