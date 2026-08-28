@@ -76,6 +76,7 @@ struct servent *sp;
 int portrange = 0;
 unsigned int portrange_from = 0;
 unsigned int portrange_to = 0;
+unsigned int blocksize = SEGSIZE;
 unsigned int windowsize;
 
 void get(int, char **);
@@ -163,7 +164,7 @@ char *tail(char *);
 static void usage(int errcode)
 {
     fprintf(stderr,
-            "Usage: %s -[vl%s][-m mode][-w window-size] [host [port]] [-c command...]\n",
+            "Usage: %s -[vl%s][-m mode][-B block-size][-w window-size] [host [port]] [-c command...]\n",
 #ifdef HAVE_IPV6
             "46",
 #else
@@ -247,6 +248,24 @@ int main(int argc, char *argv[])
                     }
                     portrange = 1;
                     break;
+                case 'B':
+                {
+                    char *end;
+                    unsigned long value;
+
+                    if (++arg >= argc)
+                        usage(EX_USAGE);
+                    errno = 0;
+                    value = strtoul(argv[arg], &end, 10);
+                    if (errno || *argv[arg] == '\0' || *end ||
+                        value < 8 || value > MAX_SEGSIZE) {
+                        fprintf(stderr, "Bad block size: %s (8-%d)\n",
+                                argv[arg], MAX_SEGSIZE);
+                        exit(EX_USAGE);
+                    }
+                    blocksize = (unsigned int)value;
+                    break;
+                }
                 case 'w':
                 {
                     char *end;

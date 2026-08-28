@@ -18,6 +18,7 @@ extern int trace;
 extern int verbose;
 extern int rexmtval;
 extern int maxtimeout;
+extern unsigned int blocksize;
 extern unsigned int windowsize;
 
 /*
@@ -25,21 +26,19 @@ extern unsigned int windowsize;
  * intentionally named differently from the identically-purposed
  * PKTSIZE macro in common/tftpsubs.c and tftpd/tftpd.c, which is
  * MAX_SEGSIZE+4: this client never negotiates a larger block size, so
- * ackbuf only ever needs to hold a request or a single default-sized
- * DATA/ACK/ERROR packet. Do not reuse this name to size buffers that
- * are meant to hold a full negotiated-size TFTP packet (see
- * tftp_recvfile()'s use of MAX_SEGSIZE+4 below for that case).
+ * ackbuf holds requests, option acknowledgments, and small control
+ * packets.  It needs to accommodate requests containing RFC 2347 options.
  */
-#define REQBUFSIZE SEGSIZE+4
+#define REQBUFSIZE MAX_SEGSIZE+4
 char ackbuf[REQBUFSIZE];
 int timeout;
 static sigjmp_buf timeoutbuf;
 
 static void nak(int, const char *);
 static int makerequest(int, const char *, struct tftphdr *, const char *,
-                       unsigned int, size_t);
+                       unsigned int, unsigned int, size_t);
 static int parse_oack(const struct tftphdr *, int, unsigned int,
-                      unsigned int *);
+                      unsigned int, unsigned int *, unsigned int *);
 static void printstats(const char *, unsigned long);
 static void startclock(void);
 static void stopclock(void);
@@ -63,8 +62,9 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     int n, size;
     volatile int packet_count, final;
     int convert = !strcmp(mode, "netascii");
-    volatile unsigned int window = requested_window ? requested_window : 1;
-    unsigned int negotiated;
+    volatile unsigned int window;
+    unsigned int negotiated_block, negotiated_window;
+    int requested_options = blocksize != SEGSIZE || requested_window;
     volatile u_short block = 1;
     u_short ap_opcode, ap_block, expected_ack;
     volatile unsigned long amount = 0;
@@ -76,7 +76,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     ap = (struct tftphdr *)ackbuf;
 
     tftp_signal(SIGALRM, timer, 0);
-    size = makerequest(WRQ, name, ap, mode, requested_window, sizeof(ackbuf));
+    size = makerequest(WRQ, name, ap, mode, blocksize, requested_window,
+                       sizeof(ackbuf));
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         goto abort_packets;
@@ -111,18 +112,19 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             printf("Error code %d: %s\n", ap_block, rp->th_msg);
             goto abort;
         }
-        if (!requested_window && ap_opcode == ACK && ap_block == 0)
-            break;
-        if (requested_window && ap_opcode == OACK) {
-            if (!parse_oack(rp, n, requested_window, &negotiated)) {
-                nak(EOPTNEG, "Invalid windowsize option");
+        if (requested_options && ap_opcode == OACK) {
+            if (!parse_oack(rp, n, blocksize, requested_window,
+                            &negotiated_block, &negotiated_window)) {
+                nak(EOPTNEG, "Invalid option response");
                 goto abort;
             }
-            window = negotiated;
+            segsize = (int)negotiated_block;
+            window = negotiated_window;
             break;
         }
-        if (requested_window && ap_opcode == ACK && ap_block == 0) {
-            window = 1;         /* Traditional server ignored the option. */
+        if (ap_opcode == ACK && ap_block == 0) {
+            segsize = SEGSIZE;
+            window = 1;         /* Traditional server ignored options. */
             break;
         }
     }
@@ -222,8 +224,9 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     FILE *file = NULL;
     volatile int n, size, packets_in_window = 0, first_data = 0, final;
     int convert = !strcmp(mode, "netascii");
-    volatile unsigned int window = requested_window ? requested_window : 1;
-    unsigned int negotiated;
+    volatile unsigned int window;
+    unsigned int negotiated_block, negotiated_window;
+    int requested_options = blocksize != SEGSIZE || requested_window;
     volatile u_short block = 1, last_acked = 0;
     u_short opcode, packet_block;
     volatile unsigned long amount = 0;
@@ -234,7 +237,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         goto abort;
     dp = w_init();
     ap = (struct tftphdr *)ackbuf;
-    size = makerequest(RRQ, name, ap, mode, requested_window, sizeof(ackbuf));
+    size = makerequest(RRQ, name, ap, mode, blocksize, requested_window,
+                       sizeof(ackbuf));
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         goto abort;
@@ -269,17 +273,20 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             printf("Error code %d: %s\n", ntohs(dp->th_code), dp->th_msg);
             goto abort;
         }
-        if (requested_window && opcode == OACK) {
-            if (!parse_oack(dp, n, requested_window, &negotiated)) {
-                nak(EOPTNEG, "Invalid windowsize option");
+        if (requested_options && opcode == OACK) {
+            if (!parse_oack(dp, n, blocksize, requested_window,
+                            &negotiated_block, &negotiated_window)) {
+                nak(EOPTNEG, "Invalid option response");
                 goto abort;
             }
-            window = negotiated;
+            segsize = (int)negotiated_block;
+            window = negotiated_window;
             ap->th_opcode = htons((u_short)ACK);
             ap->th_block = 0;
             size = 4;
             last_acked = 0;
         } else if (opcode == DATA && n >= 4 && ntohs(dp->th_block) == 1) {
+            segsize = SEGSIZE;
             window = 1;         /* Peer ignored requested options. */
             first_data = 1;
             break;
@@ -396,14 +403,21 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
 static int
 makerequest(int request, const char *name,
             struct tftphdr *tp, const char *mode,
-            unsigned int requested_window, size_t tpsize)
+            unsigned int requested_block, unsigned int requested_window,
+            size_t tpsize)
 {
     char *cp;
+    char block_value[sizeof(unsigned int) * CHAR_BIT / 3 + 2];
     char window_value[sizeof(unsigned int) * CHAR_BIT / 3 + 2];
     size_t namelen, modelen, optionlen = 0;
 
     namelen = strlen(name);
     modelen = strlen(mode);
+    if (requested_block != SEGSIZE) {
+        (void)snprintf(block_value, sizeof(block_value), "%u",
+                       requested_block);
+        optionlen += sizeof("blksize") + strlen(block_value);
+    }
     if (requested_window) {
         (void)snprintf(window_value, sizeof(window_value), "%u",
                        requested_window);
@@ -431,6 +445,12 @@ makerequest(int request, const char *name,
     cp += namelen + 1;
     memcpy(cp, mode, modelen + 1);
     cp += modelen + 1;
+    if (requested_block != SEGSIZE) {
+        memcpy(cp, "blksize", sizeof("blksize"));
+        cp += sizeof("blksize");
+        memcpy(cp, block_value, strlen(block_value) + 1);
+        cp += strlen(block_value) + 1;
+    }
     if (requested_window) {
         memcpy(cp, "windowsize", sizeof("windowsize"));
         cp += sizeof("windowsize");
@@ -442,20 +462,23 @@ makerequest(int request, const char *name,
 
 /*
  * RFC 2347 requires an OACK to contain only requested options.  The
- * client has requested only windowsize, so reject malformed, duplicate, or
- * unexpected option pairs instead of accidentally changing transfer state.
+ * client accepts only options it requested, and rejects malformed,
+ * duplicate, or unexpected option pairs.
  */
 static int
-parse_oack(const struct tftphdr *tp, int length, unsigned int requested,
-           unsigned int *negotiated)
+parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
+           unsigned int requested_window, unsigned int *negotiated_block,
+           unsigned int *negotiated_window)
 {
     const char *cp, *end, *nul;
     char *value_end;
     unsigned long value;
-    int found = 0;
+    int found = 0, block_found = 0, window_found = 0;
 
     if (length <= 2 || ntohs(tp->th_opcode) != OACK)
         return 0;
+    *negotiated_block = SEGSIZE;
+    *negotiated_window = 1;
     cp = (const char *)&tp->th_stuff;
     end = (const char *)tp + length;
     while (cp < end) {
@@ -470,13 +493,25 @@ parse_oack(const struct tftphdr *tp, int length, unsigned int requested,
         nul = memchr(cp, '\0', (size_t)(end - cp));
         if (!nul || nul == cp)
             return 0;
-        if (found || strcasecmp(option, "windowsize"))
-            return 0;
         errno = 0;
         value = strtoul(cp, &value_end, 10);
-        if (errno || value_end != nul || value < 1 || value > requested)
+        if (errno || value_end != nul)
             return 0;
-        *negotiated = (unsigned int)value;
+        if (!strcasecmp(option, "blksize")) {
+            if (block_found || requested_block == SEGSIZE ||
+                value < 8 || value > requested_block)
+                return 0;
+            *negotiated_block = (unsigned int)value;
+            block_found = 1;
+        } else if (!strcasecmp(option, "windowsize")) {
+            if (window_found || !requested_window ||
+                value < 1 || value > requested_window)
+                return 0;
+            *negotiated_window = (unsigned int)value;
+            window_found = 1;
+        } else {
+            return 0;
+        }
         found = 1;
         cp = nul + 1;
     }

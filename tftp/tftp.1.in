@@ -50,6 +50,11 @@ file name.
 \fB\-m\fP \fImode\fP
 Set the default transfer mode to \fImode\fP.  This is usually used with \-c.
 .TP
+\fB\-B\fP \fIblock-size\fP
+Request the RFC 2348 \fBblksize\fP option.  This requests data blocks up
+to \fIblock-size\fP bytes; valid values are 8 through 65464.  The default
+does not request the option.
+.TP
 \fB\-w\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option.  This permits up to
 \fIwindow-size\fP data blocks to be sent before an acknowledgment is
