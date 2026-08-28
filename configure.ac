@@ -251,13 +251,6 @@ AS_CASE([$TFTPD_MAX_WINDOWBYTES],
 AC_DEFINE_UNQUOTED([MAX_WINDOWBYTES], [$TFTPD_MAX_WINDOWBYTES],
  [maximum bytes in an RFC 7440 tftpd window; zero is unlimited])
 
-PA_ARG_DISABLED([tcpwrappers],
-  [disable tcpwrapper permissions checking], [],
-  [
-	AC_SEARCH_LIBS(yp_get_default_domain, [nsl resolv])
-	PA_HAVE_TCPWRAPPERS
-  ])
-
 AC_CHECK_HEADERS_ONCE([regex.h])
 PA_ARG_DISABLED([remap],
  [disable regex-based filename remapping], [],

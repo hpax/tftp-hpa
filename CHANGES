@@ -3,6 +3,16 @@ Changes in 6.0:
 	--windowsize and --window-bytes options to tftpd can be used
 	to limit the permitted window size.
 
+	If pthreads are available, tftpd now performs I/O in a
+	separate thread, to avoid transfer slowdowns due to I/O
+	bottlenecks.
+
+	Support for tcpwrappers has been dropped. Use kernel-level
+	firewalling if per-IP client access control is
+	desired. tcpwrappers has not been widely used for some time,
+	so this should only affect a small number of users in the
+	first place.
+
 
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to

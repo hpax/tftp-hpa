@@ -1,3 +1,13 @@
+Starting in version 6.0, tftp-hpa no longer supports using tcpwrappers
+for client permit/denial. If this is desired, use kernel-level
+firewalling on the TFTP listen port.
+
+As TFTP only uses the listen port for the request packet, the
+performance cost is neglible, and far less than having tftpd search
+the tcpwrapper configuration.
+
+	       =======================================
+
 Starting in version 0.27, tftp-hpa has the option of a "use Unix
 permissions" mode.  In this mode, tftpd can access any file accessible
 by the tftpd effective user, specified via the -u option.  This means
@@ -12,12 +22,17 @@ The sanest setup, from a security standpoint, for tftpd to run in is
 probably the following:
 
 1. Create a separate "tftpd" user and group only used for tftpd;
-2. Have all your boot files in a single directory tree (usually called 
+2. Have all your boot files in a single directory tree (usually called
    /tftpboot).
 3. Specify "-p -u tftpd -s /tftpboot" on the tftpd command line; if
    you want clients to be able to create files use
    "-p -c -U 002 -u tftpd -s /tftpboot" (replace 002 with whatever
    umask is appropriate for your setup.)
+
+When the -s (chroot) option is used, tftpd needs to be started as
+root. On Linux (at least), restricted mount trees and socket
+activation (via inetd or systemd) set up before tftpd is even started
+can avoid the need to run as root at all.
 
 	       =======================================
 

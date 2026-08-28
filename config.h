@@ -406,13 +406,13 @@ const char *inet_ntop(int, const void *, char *, socklen_t);
 #define WITH_REGEX_STR ", without remap"
 #endif
 
-#ifdef HAVE_LIBWRAP
-#define HAVE_LIBWRAP_STR ", with tcpwrappers"
+#ifdef HAVE_PTHREADS
+#define WITH_THREADS_STR ", with I/O threads"
 #else
-#define HAVE_LIBWRAP_STR ", without tcpwrappers"
+#define WITH_THREADS_STR ", without I/O threads"
 #endif
 
 #define TFTP_CONFIG_STR VERSION WITH_READLINE_STR
-#define TFTPD_CONFIG_STR VERSION WITH_REGEX_STR HAVE_LIBWRAP_STR
+#define TFTPD_CONFIG_STR VERSION WITH_REGEX_STR WITH_THREADS_STR
 
 #endif

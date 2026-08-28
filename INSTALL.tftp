@@ -6,11 +6,6 @@ specifics apply to the tftp-hpa package:
 
 The tftp-hpa package supports the following options to ./configure:
 
-  --without-tcpwrappers
-	Disables the use of the tcp wrapper library.  This is
-	recommended, for performance reasons, on high-use sites.
-	Kernel-based firewalling is, in general, a better alternative.
-
   --without-remap
 	Disables the use of regular-expression-based filename
 	remapping (the -m option to tftpd).

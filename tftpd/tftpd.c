@@ -36,15 +36,6 @@
 #include <sys/filio.h>          /* Necessary for FIONBIO on Solaris */
 #endif
 
-#ifdef HAVE_TCPWRAPPERS
-#include <tcpd.h>
-
-int deny_severity = LOG_WARNING;
-int allow_severity = -1;        /* Don't log at all */
-
-static struct request_info wrap_request;
-#endif
-
 #ifdef HAVE_IPV6
 static int ai_fam = AF_UNSPEC;
 #else
@@ -914,30 +905,6 @@ int main(int argc, char **argv)
         closelog();
         openlog(_progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
     }
-
-#ifdef HAVE_TCPWRAPPERS
-    /* Verify if this was a legal request for us.  This has to be
-       done before the chroot, while /etc is still accessible. */
-    request_init(&wrap_request,
-                 RQ_DAEMON, _progname,
-                 RQ_FILE, fd,
-                 RQ_CLIENT_SIN, &from, RQ_SERVER_SIN, &myaddr, 0);
-    sock_methods(&wrap_request);
-
-    tmp_p = (char *)inet_ntop(myaddr.sa.sa_family, SOCKADDR_P(&myaddr),
-                              tmpbuf, INET6_ADDRSTRLEN);
-    if (!tmp_p) {
-        tmp_p = tmpbuf;
-        strcpy(tmpbuf, "???");
-    }
-    if (hosts_access(&wrap_request) == 0) {
-        if (deny_severity != -1)
-            tftpd_log(deny_severity, "connection refused from %s", tmp_p);
-        exit(EX_NOPERM);        /* Access denied */
-    } else if (allow_severity != -1) {
-        tftpd_log(allow_severity, "connect from %s", tmp_p);
-    }
-#endif
 
     /* Close file descriptors we don't need */
     close_listen_set();
