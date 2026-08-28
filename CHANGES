@@ -1,3 +1,9 @@
+Changes in 6.0:
+	The TFTP windowsize option (RFC 7440) is now supported. The
+	--windowsize and --window-bytes options to tftpd can be used
+	to limit the permitted window size.
+
+
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to
 	multiple addresses. Furthermore, if --address is given a
