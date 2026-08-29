@@ -1384,9 +1384,6 @@ static void do_opt(const char *opt, const char *val, char **ap)
 		p += optlen+1;
 		memcpy(p, retbuf, retlen+1);
 		p += retlen+1;
-            } else {
-                nak(EOPTNEG, "Unsupported option(s) requested");
-                exit(0);
             }
             break;
         }

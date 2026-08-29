@@ -23,6 +23,9 @@ Changes in 6.0:
 
 	Fix the --stderr option with --secure.
 
+	Do not fail a transfer because the client requested unknown
+	options.
+
 
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to
