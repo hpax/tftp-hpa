@@ -89,6 +89,7 @@ void put(int, char **);
 void quit(int, char **);
 void setascii(int, char **);
 void setbinary(int, char **);
+void setblocksize(int, char **);
 void setpeer(int, char **);
 void setrexmt(int, char **);
 void settimeout(int, char **);
@@ -96,11 +97,14 @@ void settrace(int, char **);
 void setverbose(int, char **);
 void status(int, char **);
 void setliteral(int, char **);
+void setwindowsize(int, char **);
 
 static void command(void);
 
 static void getusage(char *);
 static int makeargv(char *, char **);
+static int parse_uint_range(const char *, unsigned int, unsigned int,
+                            unsigned int *);
 static void putusage(char *);
 static void settftpmode(const struct modes *);
 
@@ -146,12 +150,18 @@ static const struct cmd cmdtab[] = {
     {"ascii",
      "set mode to netascii",
      setascii},
+    {"blocksize",
+     "set the requested transfer block size",
+     setblocksize},
     {"rexmt",
      "set per-packet transmission timeout",
      setrexmt},
     {"timeout",
      "set total retransmission timeout",
      settimeout},
+    {"windowsize",
+     "set the requested transfer window size",
+     setwindowsize},
     {"?",
      "print help information",
      help},
@@ -190,6 +200,22 @@ static noreturn void usage(int errcode)
             _progname);
 
     exit(errcode);
+}
+
+static int parse_uint_range(const char *arg, unsigned int minimum,
+                            unsigned int maximum, unsigned int *value)
+{
+    char *end;
+    unsigned long parsed;
+
+    errno = 0;
+    parsed = strtoul(arg, &end, 10);
+    if (errno || *arg == '\0' || *end || parsed < minimum ||
+        parsed > maximum)
+        return 0;
+
+    *value = (unsigned int)parsed;
+    return 1;
 }
 
 static const struct option long_options[] = {
@@ -300,38 +326,21 @@ int main(int argc, char *argv[])
             portrange = 1;
             break;
         case 'B':
-        {
-            char *end;
-            unsigned long value;
-
-            errno = 0;
-            value = strtoul(optarg, &end, 10);
-            if (errno || *optarg == '\0' || *end ||
-                value < 8 || value > MAX_SEGSIZE) {
-                fprintf(stderr, "Bad block size: %s (8-%d)\n",
-                        optarg, MAX_SEGSIZE);
+            if (!parse_uint_range(optarg, 8, MAX_SEGSIZE, &blocksize)) {
+                fprintf(stderr, "Bad block size: %s (8-%d)\n", optarg,
+                        MAX_SEGSIZE);
                 exit(EX_USAGE);
             }
-            blocksize = (unsigned int)value;
             break;
-        }
         case 'W':
         case 'w':
-        {
-            char *end;
-            unsigned long value;
-
-            errno = 0;
-            value = strtoul(optarg, &end, 10);
-            if (errno || *optarg == '\0' || *end ||
-                value < 1 || value > TFTP_MAX_WINDOWSIZE) {
+            if (!parse_uint_range(optarg, 1, TFTP_MAX_WINDOWSIZE,
+                                  &windowsize)) {
                 fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
                         optarg, TFTP_MAX_WINDOWSIZE);
                 exit(EX_USAGE);
             }
-            windowsize = (unsigned int)value;
             break;
-        }
         case 'h':
             usage(0);
             break;
@@ -360,7 +369,7 @@ int main(int argc, char *argv[])
 
     tftp_signal(SIGINT, intr, 0);
 
-    if (peerargc) {
+    if (peerargc > 1) {
         /* Set peer */
         if (sigsetjmp(toplevel, 1) != 0)
             exit(EX_NOHOST);
@@ -810,6 +819,40 @@ void settimeout(int argc, char *argv[])
         maxtimeout = t;
 }
 
+void setblocksize(int argc, char *argv[])
+{
+    if (argc < 2) {
+        getmoreargs("blocksize ", "(size) ");
+        argc = margc = makeargv(line, margv);
+        argv = margv;
+    }
+    if (argc != 2) {
+        printf("usage: %s size\n", argv[0]);
+        return;
+    }
+    if (!parse_uint_range(argv[1], 8, MAX_SEGSIZE, &blocksize)) {
+        printf("%s: bad block size (valid range is 8-%d)\n",
+               argv[1], MAX_SEGSIZE);
+    }
+}
+
+void setwindowsize(int argc, char *argv[])
+{
+    if (argc < 2) {
+        getmoreargs("windowsize ", "(size) ");
+        argc = margc = makeargv(line, margv);
+        argv = margv;
+    }
+    if (argc != 2) {
+        printf("usage: %s size\n", argv[0]);
+        return;
+    }
+    if (!parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE, &windowsize)) {
+        printf("%s: bad window size (valid range is 1-%u)\n",
+               argv[1], TFTP_MAX_WINDOWSIZE);
+    }
+}
+
 void setliteral(int argc, char *argv[])
 {
     (void)argc;
@@ -831,6 +874,8 @@ void status(int argc, char *argv[])
            literal ? "on" : "off");
     printf("Rexmt-interval: %d seconds, Max-timeout: %d seconds\n",
            rexmtval, maxtimeout);
+    printf("Blocksize: %u, windowsize: %u\n", blocksize,
+           windowsize ? windowsize : 1);
 }
 
 void intr(int sig)

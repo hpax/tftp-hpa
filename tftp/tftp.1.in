@@ -164,6 +164,10 @@ or
 The default is
 .BR ascii .
 .TP
+\fBblocksize\fP \fIblock-size\fP
+Request the RFC 2348 \fBblksize\fP option with \fIblock-size\fP bytes
+per data block. Valid values are 8 through 65464.
+.TP
 \fBput\fP \fIfile\fP
 .sp -.6l
 .TP
@@ -197,6 +201,10 @@ Show current status.
 .TP
 \fBtimeout\fP \fItotal-transmission-timeout\fP
 Set the total transmission timeout, in seconds.
+.TP
+\fBwindowsize\fP \fIwindow-size\fP
+Request the RFC 7440 \fBwindowsize\fP option with \fIwindow-size\fP
+data blocks per window. Valid values are 1 through 32768.
 .TP
 .B trace
 Toggle packet tracing (a debugging feature.)

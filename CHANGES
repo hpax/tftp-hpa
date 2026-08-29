@@ -33,6 +33,8 @@ Changes in 6.0:
 
 	Add support for long command line options to the client.
 
+	Add interactive blocksize and windowsize commands to the client.
+
 
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to
