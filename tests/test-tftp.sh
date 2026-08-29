@@ -31,6 +31,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+time=$(type -P time)
+export TIME="${YELLOW}[TIME]${NC} real %e user %U sys %s\\n"
+
 print_info() {
     echo -e "${YELLOW}[INFO]${NC} $*"
 }
@@ -41,6 +44,11 @@ print_success() {
 
 print_error() {
     echo -e "${RED}[FAIL]${NC} $*"
+}
+
+# Print the difference between two fractional timestamps
+difftime() {
+    echo "$2 - $1" | bc
 }
 
 # Cleanup function
@@ -178,7 +186,10 @@ test_download() {
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
 		       -c get "$server_file" "$download_file")
     print_info "${TFTP_CMD[*]}"
-    ${TFTP_CMD[@]} 2>&1 | grep -v "^Connected"
+    local start=$(date -u +%s.%N)
+    "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
+    local end=$(date -u +%s.%N)
+    print_info time = $(difftime $start $end)
 
     # Verify file was downloaded
     if [ ! -f "$download_file" ]; then
@@ -209,7 +220,10 @@ test_upload() {
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
 		       -c put "$TEST_DIR/$filename" "$server_file")
     print_info "${TFTP_CMD[*]}"
+    local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
+    local end=$(date -u +%s.%N)
+    print_info time = $(difftime $start $end)
 
     # Verify file was uploaded
     if [ ! -f "$SERVER_DIR/$filename" ]; then
@@ -239,8 +253,9 @@ main() {
     print_info "Server port:      $PORT"
     print_info ""
 
-    local tests_passed=0
+    local tests_passed=sys0
     local tests_failed=0
+    local start_tests=$(date -u +%s.%N)
 
     check_binaries
     create_test_files
@@ -290,10 +305,13 @@ main() {
 	done
     done
 
+    local end_tests=$(date -u +%s.%N)
+
     print_info ""
     print_info "================================"
     print_info "Test Results Summary"
     print_info "================================"
+    print_info "Time elapsed: "$(difftime $start_tests $end_tests)
     print_success "Tests passed: $tests_passed"
 
     if [ $tests_failed -gt 0 ]; then
