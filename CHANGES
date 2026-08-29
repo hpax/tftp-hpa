@@ -26,6 +26,9 @@ Changes in 6.0:
 	Do not fail a transfer because the client requested unknown
 	options.
 
+	Add the --reject-all option to disable RFC 2347 option
+	negotiation completely.
+
 
 Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to

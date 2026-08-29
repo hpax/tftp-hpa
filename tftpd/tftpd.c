@@ -90,6 +90,7 @@ static int secure = 0;
 int cancreate = 0;
 int unixperms = 0;
 int portrange = 0;
+static int reject_all_options;
 unsigned int portrange_from, portrange_to;
 int verbosity = 0;
 
@@ -332,7 +333,8 @@ enum long_only_options {
     OPT_MAP_TEST,
     OPT_MAP_STEPS,
     OPT_SYSTEMD,
-    OPT_WINDOW_BYTES
+    OPT_WINDOW_BYTES,
+    OPT_REJECT_ALL
 };
 
 static struct option long_options[] = {
@@ -354,6 +356,7 @@ static struct option long_options[] = {
     { "user",        1, NULL, 'u' },
     { "umask",       1, NULL, 'U' },
     { "refuse",      1, NULL, 'r' },
+    { "reject-all",  0, NULL, OPT_REJECT_ALL },
     { "timeout",     1, NULL, 't' },
     { "retransmit",  1, NULL, 'T' },
     { "port-range",  1, NULL, 'R' },
@@ -570,6 +573,9 @@ int main(int argc, char **argv)
                 tftpd_log(LOG_ERR, "Unknown option: %s", optarg);
                 exit(EX_USAGE);
             }
+            break;
+        case OPT_REJECT_ALL:
+            reject_all_options = 1;
             break;
 #ifdef WITH_REGEX
         case 'm':
@@ -1357,6 +1363,9 @@ static void do_opt(const char *opt, const char *val, char **ap)
 
     /* Global option-parsing variables initialization */
     blksize_set = 0;
+
+    if (reject_all_options)
+        return;
 
     if (!*opt || !*val)
         return;

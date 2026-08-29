@@ -348,6 +348,10 @@ example, some TFTP clients have been found to request the
 .B blksize
 option, but crash with an error if they actually get the option
 accepted by the server.
+.TP
+\fB\-\-reject-all\fP
+Disable all RFC 2347 options.  Requests containing options proceed
+directly to the normal TFTP data stage without an option acknowledgment.
 
 .SH "FILENAME REMAPPING"
 The
