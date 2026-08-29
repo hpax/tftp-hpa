@@ -51,14 +51,12 @@
 #include <strings.h>
 #endif
 
-#ifdef HAVE_INTTYPES_H
-#ifdef INTTYPES_H_IS_SANE
+#if defined(HAVE_INTTYPES_H) && defined(INTTYPES_H_IS_SANE)
 #include <inttypes.h>
-#endif
-#else
-#ifdef HAVE_STDINT_H
+#elif defined(HAVE_STDINT_H)
 #include <stdint.h>
-#endif
+#else
+#include "lib/int_type.h"
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -240,24 +238,6 @@ typedef unsigned long uintmax_t;
 #endif
 
 /* A lot of this is old BSD code.  Some newer systems don't approve. */
-
-/* The type used by htons(), ntohs() */
-#ifndef HAVE_U_SHORT
-#ifdef HAVE_UINT16_T
-typedef uint16_t u_short;
-#else
-typedef unsigned short u_short;
-#endif
-#endif
-
-/* The type used to htonl(), ntohl() */
-#ifndef HAVE_U_LONG
-#ifdef HAVE_UINT32_T
-typedef uint32_t u_long;
-#else
-typedef unsigned long u_long;
-#endif
-#endif
 
 /* socklen_t */
 #ifndef HAVE_SOCKLEN_T

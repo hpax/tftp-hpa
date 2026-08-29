@@ -66,7 +66,7 @@ char *strip_address(char *);
 #define strip_address(a)	(a)
 #endif
 
-static inline int sa_set_port(union sock_addr *s, u_short port)
+static inline int sa_set_port(union sock_addr *s, uint16_t port)
 {
        switch (s->sa.sa_family) {
        case AF_INET:

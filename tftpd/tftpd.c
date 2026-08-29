@@ -407,7 +407,7 @@ int main(int argc, char **argv)
     char *rewrite_file = NULL;
 #endif
     const char *pidfile = NULL;
-    u_short tp_opcode;
+    uint16_t tp_opcode;
     bool patherr;
     pollset_cursor cursor;
     struct strlist listen_addrs;
@@ -1049,7 +1049,7 @@ int tftp(struct tftphdr *tp, int size)
     char *origfilename;
     char *filename, *mode = NULL;
     const char *errmsgptr;
-    u_short tp_opcode = ntohs(tp->th_opcode);
+    uint16_t tp_opcode = ntohs(tp->th_opcode);
 
     char *val = NULL, *opt = NULL;
     char *ap = ackbuf + 2;
@@ -1676,8 +1676,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
 {
     struct tftphdr *dp;
     struct tftphdr *ap;         /* ack packet */
-    static u_short block = 1;   /* Static to avoid longjmp funnies */
-    u_short ap_opcode, ap_block;
+    static uint16_t block = 1;   /* Static to avoid longjmp funnies */
+    uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     int n;
 #ifndef HAVE_PTHREAD
@@ -1703,8 +1703,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                 goto abort;
             }
             ap = (struct tftphdr *)ackbuf;
-            ap_opcode = ntohs((u_short) ap->th_opcode);
-            ap_block = ntohs((u_short) ap->th_block);
+            ap_opcode = ntohs((uint16_t) ap->th_opcode);
+            ap_block = ntohs((uint16_t) ap->th_block);
 
             if (ap_opcode == ERROR) {
                 tftpd_log(LOG_WARNING,
@@ -1725,7 +1725,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     {
         static unsigned int packet_count;
         static int final;
-        u_short expected_ack;
+        uint16_t expected_ack;
 
         io = tftpio_reader_start(file, pf->f_convert, windowsize,
                                  io_ring_slots(), segsize);
@@ -1740,8 +1740,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
             }
             for (n = 0; n < (int)packet_count; n++) {
                 dp = tftpio_reader_packet(io, (unsigned int)n);
-                dp->th_opcode = htons((u_short) DATA);
-                dp->th_block = htons((u_short)block);
+                dp->th_opcode = htons((uint16_t) DATA);
+                dp->th_block = htons((uint16_t)block);
                 if (!++block)
                     block = rollover_val;
             }
@@ -1765,8 +1765,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                     goto abort;
                 }
                 ap = (struct tftphdr *)ackbuf;
-                ap_opcode = ntohs((u_short)ap->th_opcode);
-                ap_block = ntohs((u_short)ap->th_block);
+                ap_opcode = ntohs((uint16_t)ap->th_opcode);
+                ap_block = ntohs((uint16_t)ap->th_block);
                 if (ap_opcode == ERROR)
                     goto abort;
                 expected_ack = ntohs(tftpio_reader_packet(io, packet_count - 1)
@@ -1793,7 +1793,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         char *packets = xcalloc(windowsize, packetsize);
         int *lengths = xcalloc(windowsize, sizeof(*lengths));
         volatile int packet_count, final;
-        u_short expected_ack;
+        uint16_t expected_ack;
 
         dp = r_init();
         for (;;) {
@@ -1805,8 +1805,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                     nak(-errno, NULL);
                     goto abort_packets;
                 }
-                dp->th_opcode = htons((u_short) DATA);
-                dp->th_block = htons((u_short) block);
+                dp->th_opcode = htons((uint16_t) DATA);
+                dp->th_block = htons((uint16_t) block);
                 memcpy(packets + (size_t)packet_count * packetsize, dp,
                        (size_t)size + 4);
                 lengths[packet_count++] = size + 4;
@@ -1835,8 +1835,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
                     goto abort_packets;
                 }
                 ap = (struct tftphdr *)ackbuf;
-                ap_opcode = ntohs((u_short) ap->th_opcode);
-                ap_block = ntohs((u_short) ap->th_block);
+                ap_opcode = ntohs((uint16_t) ap->th_opcode);
+                ap_block = ntohs((uint16_t) ap->th_block);
                 if (ap_opcode == ERROR)
                     goto abort_packets;
                 expected_ack = ntohs(((struct tftphdr *)
@@ -1877,11 +1877,11 @@ static void tftp_recvfile(const struct formats *pf,
     /* These are "static" to avoid longjmp funnies */
     static struct tftphdr *oap;
     static struct tftphdr *ap;  /* ack buffer */
-    static u_short block;
-    static u_short last_acked;
+    static uint16_t block;
+    static uint16_t last_acked;
     static int acksize;
     static unsigned int packets_in_window;
-    u_short dp_opcode, dp_block;
+    uint16_t dp_opcode, dp_block;
     unsigned long r_timeout;
 
     oap = oack;
@@ -1910,7 +1910,7 @@ static void tftp_recvfile(const struct formats *pf,
         restarted = sigsetjmp(timeoutbuf, 1);
         if (oap || restarted) {
             if (!oap) {
-                ap->th_opcode = htons((u_short) ACK);
+                ap->th_opcode = htons((uint16_t) ACK);
                 ap->th_block = htons(last_acked);
                 acksize = 4;
             }
@@ -1934,15 +1934,15 @@ static void tftp_recvfile(const struct formats *pf,
                 tftpd_log(LOG_WARNING, "tftpd: read: %m");
                 goto abort;
             }
-            dp_opcode = ntohs((u_short) dp->th_opcode);
-            dp_block = ntohs((u_short) dp->th_block);
+            dp_opcode = ntohs((uint16_t) dp->th_opcode);
+            dp_block = ntohs((uint16_t) dp->th_block);
             if (dp_opcode == ERROR)
                 goto abort;
             if (dp_opcode == DATA) {
                 if (dp_block == block)
                     break;
                 if (dp_block == last_acked) {
-                    ap->th_opcode = htons((u_short) ACK);
+                    ap->th_opcode = htons((uint16_t) ACK);
                     ap->th_block = htons(last_acked);
                     (void)send(peer, ap, 4, 0);
                 }
@@ -1973,7 +1973,7 @@ static void tftp_recvfile(const struct formats *pf,
         if (final || packets_in_window == windowsize) {
             last_acked = dp_block;
             packets_in_window = 0;
-            ap->th_opcode = htons((u_short) ACK);
+            ap->th_opcode = htons((uint16_t) ACK);
             ap->th_block = htons(last_acked);
             acksize = 4;
 #ifdef HAVE_PTHREAD
@@ -2083,8 +2083,8 @@ static void nak(int error, const char *msg)
         msg = "Request failed";
 
     tp = (struct tftphdr *)buf;
-    tp->th_opcode = htons((u_short) ERROR);
-    tp->th_code   = htons((u_short) error);
+    tp->th_opcode = htons((uint16_t) ERROR);
+    tp->th_code   = htons((uint16_t) error);
 
     length = strlen(msg) + 1;
     memcpy(tp->th_msg, msg, length);

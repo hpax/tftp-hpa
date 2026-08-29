@@ -66,8 +66,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     volatile unsigned int window;
     unsigned int negotiated_block, negotiated_window;
     int requested_options = blocksize != SEGSIZE || requested_window;
-    volatile u_short block = 1;
-    u_short ap_opcode, ap_block, expected_ack;
+    volatile uint16_t block = 1;
+    uint16_t ap_opcode, ap_block, expected_ack;
     volatile unsigned long amount = 0;
 
     startclock();
@@ -145,7 +145,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
                 nak(errno + 100, NULL);
                 goto abort_packets;
             }
-            dp->th_opcode = htons((u_short)DATA);
+            dp->th_opcode = htons((uint16_t)DATA);
             dp->th_block = htons(block);
             memcpy(packets + (size_t)packet_count * packetsize,
                    dp, (size_t)size + 4);
@@ -233,8 +233,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     volatile unsigned int window;
     unsigned int negotiated_block, negotiated_window;
     int requested_options = blocksize != SEGSIZE || requested_window;
-    volatile u_short block = 1, last_acked = 0;
-    u_short opcode, packet_block;
+    volatile uint16_t block = 1, last_acked = 0;
+    uint16_t opcode, packet_block;
     volatile unsigned long amount = 0;
 
     startclock();
@@ -289,7 +289,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             window = negotiated_window;
             tftp_set_socket_buffers(f, negotiated_block,
                                     negotiated_window, false);
-            ap->th_opcode = htons((u_short)ACK);
+            ap->th_opcode = htons((uint16_t)ACK);
             ap->th_block = 0;
             size = 4;
             last_acked = 0;
@@ -322,7 +322,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
          * immediately after an OACK, which makes OACK loss recoverable.
          */
         if (timedout && !first_data) {
-            ap->th_opcode = htons((u_short)ACK);
+            ap->th_opcode = htons((uint16_t)ACK);
             ap->th_block = htons(last_acked);
             if (trace)
                 tpacket("sent", ap, 4);
@@ -358,7 +358,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             continue;
         if (packet_block != block) {
             if (packet_block == last_acked) {
-                ap->th_opcode = htons((u_short)ACK);
+                ap->th_opcode = htons((uint16_t)ACK);
                 ap->th_block = htons(last_acked);
                 if (trace)
                     tpacket("sent", ap, 4);
@@ -381,7 +381,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         block++;
         final = size != segsize;
         if (final || packets_in_window == (int)window) {
-            ap->th_opcode = htons((u_short)ACK);
+            ap->th_opcode = htons((uint16_t)ACK);
             ap->th_block = htons(packet_block);
             last_acked = packet_block;
             packets_in_window = 0;
@@ -447,7 +447,7 @@ makerequest(int request, const char *name,
         return -1;
     }
 
-    tp->th_opcode = htons((u_short) request);
+    tp->th_opcode = htons((uint16_t) request);
     cp = (char *)&(tp->th_stuff);
     memcpy(cp, name, namelen + 1);
     cp += namelen + 1;
@@ -552,8 +552,8 @@ static void nak(int error, const char *msg)
     int length;
 
     tp = (struct tftphdr *)ackbuf;
-    tp->th_opcode = htons((u_short) ERROR);
-    tp->th_code = htons((u_short) error);
+    tp->th_opcode = htons((uint16_t) ERROR);
+    tp->th_code = htons((uint16_t) error);
 
     if (error >= 100) {
         /* This is a Unix errno+100 */
@@ -568,7 +568,7 @@ static void nak(int error, const char *msg)
             msg = errmsgs[error];
     }
 
-    tp->th_code = htons((u_short) error);
+    tp->th_code = htons((uint16_t) error);
 
     length = strlen(msg) + 1;
     memcpy(tp->th_msg, msg, length);
@@ -586,7 +586,7 @@ static void tpacket(const char *s, struct tftphdr *tp, int n)
     static const char *opcodes[] =
         { "#0", "RRQ", "WRQ", "DATA", "ACK", "ERROR", "OACK" };
     char *cp, *file;
-    u_short op = ntohs((u_short) tp->th_opcode);
+    uint16_t op = ntohs((uint16_t) tp->th_opcode);
 
     if (op < RRQ || op > OACK)
         printf("%s opcode=%x ", s, op);

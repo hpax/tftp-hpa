@@ -58,7 +58,7 @@ int ai_fam_sock = AF_INET;
 
 union sock_addr peeraddr;
 int f = -1;
-u_short port;
+uint16_t port;
 int trace;
 int verbose;
 int literal;
@@ -535,7 +535,7 @@ void setpeer(int argc, char *argv[])
                 connected = 0;
                 return;
             }
-            port = htons((u_short) myport);
+            port = htons((uint16_t) myport);
         }
     }
 

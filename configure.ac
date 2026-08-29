@@ -105,8 +105,7 @@ AC_CHECK_TYPES(intmax_t)
 AC_CHECK_TYPES(long long)
 AC_CHECK_TYPES(uint16_t)
 AC_CHECK_TYPES(uint32_t)
-AC_CHECK_TYPES(u_short)
-AC_CHECK_TYPES(u_long)
+AC_CHECK_TYPES(uint64_t)
 
 AC_CHECK_TYPES(socklen_t)
 
