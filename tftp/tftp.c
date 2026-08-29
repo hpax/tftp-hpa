@@ -121,6 +121,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             }
             segsize = (int)negotiated_block;
             window = negotiated_window;
+            tftp_set_socket_buffers(f, negotiated_block,
+                                    negotiated_window, true);
             break;
         }
         if (ap_opcode == ACK && ap_block == 0) {
@@ -285,6 +287,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             }
             segsize = (int)negotiated_block;
             window = negotiated_window;
+            tftp_set_socket_buffers(f, negotiated_block,
+                                    negotiated_window, false);
             ap->th_opcode = htons((u_short)ACK);
             ap->th_block = 0;
             size = 4;

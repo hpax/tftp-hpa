@@ -1133,6 +1133,7 @@ int tftp(struct tftphdr *tp, int size)
     }
 
     negotiate_windowsize(&ap);
+    tftp_set_socket_buffers(peer, segsize, windowsize, tp_opcode == RRQ);
 
     if (ap != (ackbuf + 2)) {
         if (tp_opcode == WRQ)

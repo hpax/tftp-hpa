@@ -84,6 +84,7 @@ static inline int sa_set_port(union sock_addr *s, u_short port)
 }
 
 int set_sock_addr(char *, union sock_addr *, char **, bool);
+void tftp_set_socket_buffers(int, unsigned int, unsigned int, bool);
 
 /*
  * Wrapper for setsockopt() for the case where the option is an int.
