@@ -6,6 +6,7 @@
  */
 
 #include "common/tftpsubs.h"
+#include "common/tftp-xfer.h"
 
 /*
  * TFTP User Program -- Protocol Machines
@@ -33,6 +34,7 @@ extern unsigned int windowsize;
 static char ackbuf[REQBUFSIZE];
 static int timeout;
 static sigjmp_buf timeoutbuf;
+static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 
 static void nak(int, const char *);
 static int makerequest(int, const char *, struct tftphdr *, const char *,
@@ -45,29 +47,108 @@ static void stopclock(void);
 static void timer(int);
 static void tpacket(const char *, const struct tftphdr *, int);
 
+struct client_xfer_context {
+    FILE *file;
+    union sock_addr from;
+    int convert;
+};
+
+static int client_xfer_send(void *vctx, const void *packet, int length)
+{
+    (void)vctx;
+    if (trace)
+        tpacket("sent", packet, length);
+    return sendto(f, packet, length, 0, &peeraddr.sa,
+                  SOCKLEN(&peeraddr)) == length ? 0 : -1;
+}
+
+static int client_xfer_recv(void *vctx, void *packet, int length)
+{
+    struct client_xfer_context *ctx = vctx;
+    socklen_t fromlen = sizeof(ctx->from);
+    int n;
+
+    alarm(rexmtval);
+    n = recvfrom(f, packet, length, 0, &ctx->from.sa, &fromlen);
+    alarm(0);
+    if (n >= 0)
+        sa_set_port(&peeraddr, SOCKPORT(&ctx->from));
+    return n;
+}
+
+static void client_xfer_received(void *vctx, const struct tftphdr *packet,
+                                 int length)
+{
+    (void)vctx;
+    if (trace)
+        tpacket("received", packet, length);
+}
+
+static void client_xfer_drain(void *vctx)
+{
+    (void)vctx;
+    (void)synchnet(f);
+}
+
+static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
+                                    int restarted)
+{
+    (void)vctx;
+    active_timeoutbuf = retrybuf;
+    if (!restarted)
+        timeout = 0;
+}
+
+static void client_xfer_retry_leave(void *vctx)
+{
+    (void)vctx;
+    active_timeoutbuf = &timeoutbuf;
+}
+
+static void client_xfer_wait_begin(void *vctx)
+{
+    (void)vctx;
+}
+
+static void client_xfer_flush(void *vctx)
+{
+    struct client_xfer_context *ctx = vctx;
+
+    (void)write_behind(ctx->file, ctx->convert);
+}
+
+static const struct tftp_xfer_ops client_xfer_ops = {
+    client_xfer_send,
+    client_xfer_recv,
+    client_xfer_received,
+    client_xfer_drain,
+    client_xfer_retry_enter,
+    client_xfer_retry_leave,
+    client_xfer_wait_begin,
+    client_xfer_flush
+};
+
 /*
  * Send the requested file.
  */
 void tftp_sendfile(int fd, const char *name, const char *mode,
                    unsigned int requested_window)
 {
-    struct tftphdr *dp, *ap;
+    struct tftphdr *ap;
     char response[REQBUFSIZE];
     const struct tftphdr *rp = (const struct tftphdr *)response;
     union sock_addr from;
     socklen_t fromlen;
     FILE *file = NULL;
-    char * volatile packets = NULL;
-    int * volatile lengths = NULL;
+    struct client_xfer_context context;
+    struct tftp_xfer xfer;
+    struct tftp_xfer_result result;
     int n, size;
-    size_t packetsize;
-    volatile int packet_count, final;
     int convert = !strcmp(mode, "netascii");
-    volatile unsigned int window;
+    unsigned int window;
     unsigned int negotiated_block, negotiated_window;
     int requested_options = blocksize != SEGSIZE || requested_window;
-    volatile uint16_t block = 1;
-    uint16_t ap_opcode, ap_block, expected_ack;
+    uint16_t ap_opcode, ap_block;
     volatile uintmax_t amount = 0;
 
     startclock();
@@ -81,7 +162,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
                        sizeof(ackbuf));
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
-        goto abort_packets;
+        goto abort;
     }
 
     /* A peer which ignores options answers a WRQ with ACK 0. */
@@ -92,7 +173,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             tpacket("sent", ap, size);
         if (sendto(f, ap, size, 0, &peeraddr.sa, SOCKLEN(&peeraddr)) != size) {
             perror("tftp: sendto");
-            goto abort_packets;
+            goto abort;
         }
         alarm(rexmtval);
         fromlen = sizeof(from);
@@ -100,7 +181,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         alarm(0);
         if (n < 0) {
             perror("tftp: recvfrom");
-            goto abort_packets;
+            goto abort;
         }
         sa_set_port(&peeraddr, SOCKPORT(&from));
         if (n < 2)
@@ -132,84 +213,39 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         }
     }
 
-    dp = r_init();
-    packetsize = ((size_t)segsize + 5) & ~(size_t)1;
-    packets = xcalloc(window, packetsize);
-    lengths = xcalloc(window, sizeof(*lengths));
-    for (;;) {
-        packet_count = 0;
-        final = 0;
-        do {
-            size = readit(file, &dp, convert);
-            if (size < 0) {
-                nak(errno + 100, NULL);
-                goto abort_packets;
-            }
-            dp->th_opcode = htons((uint16_t)DATA);
-            dp->th_block = htons(block);
-            memcpy(packets + (size_t)packet_count * packetsize,
-                   dp, (size_t)size + 4);
-            lengths[packet_count] = size + 4;
-            read_ahead(file, convert);
-            packet_count++;
-            if (size != segsize)
-                final = 1;
-            block++;
-        } while (packet_count < (int)window && !final);
+    context.file = file;
+    context.convert = convert;
+    xfer.file = file;
+    xfer.convert = convert;
+    xfer.blocksize = segsize;
+    xfer.windowsize = window;
+    xfer.rollover = 0;
+    xfer.resend_oack = requested_window != 0;
+    xfer.control = ackbuf;
+    xfer.control_size = sizeof(ackbuf);
+    xfer.context = &context;
+    xfer.ops = &client_xfer_ops;
+    tftp_xfer_send(&xfer, &result);
+    amount = result.bytes;
 
-        timeout = 0;
-        (void)sigsetjmp(timeoutbuf, 1);
-      resend_window:
-        for (n = 0; n < packet_count; n++) {
-            dp = (struct tftphdr *)(packets +
-                                    (size_t)n * packetsize);
-            if (trace)
-                tpacket("sent", dp, lengths[n]);
-            if (sendto(f, dp, lengths[n], 0, &peeraddr.sa,
-                       SOCKLEN(&peeraddr)) != lengths[n]) {
-                perror("tftp: sendto");
-                goto abort_packets;
-            }
-        }
-        for (;;) {
-            alarm(rexmtval);
-            fromlen = sizeof(from);
-            n = recvfrom(f, ackbuf, sizeof(ackbuf), 0, &from.sa, &fromlen);
-            alarm(0);
-            if (n < 0) {
-                perror("tftp: recvfrom");
-                goto abort_packets;
-            }
-            sa_set_port(&peeraddr, SOCKPORT(&from));
-            if (n < 4)
-                continue;
-            if (trace)
-                tpacket("received", ap, n);
-            ap_opcode = ntohs(ap->th_opcode);
-            ap_block = ntohs(ap->th_block);
-            if (ap_opcode == ERROR) {
-                printf("Error code %d: %s\n", ap_block, ap->th_msg);
-                goto abort_packets;
-            }
-            expected_ack = ntohs(((struct tftphdr *)(packets +
-                                  (size_t)(packet_count - 1) *
-                                  packetsize))->th_block);
-            if (ap_opcode == ACK && ap_block == expected_ack)
-                break;
-            if (ap_opcode == OACK && requested_window)
-                goto resend_window;
-            if (ap_opcode == ACK)
-                (void)synchnet(f);
-        }
-        for (n = 0; n < packet_count; n++)
-            amount += lengths[n] - 4;
-        if (final)
-            break;
+    switch (result.status) {
+    case TFTP_XFER_READ_ERROR:
+        nak(result.error + 100, NULL);
+        break;
+    case TFTP_XFER_SEND_ERROR:
+        errno = result.error;
+        perror("tftp: sendto");
+        break;
+    case TFTP_XFER_RECV_ERROR:
+        errno = result.error;
+        perror("tftp: recvfrom");
+        break;
+    case TFTP_XFER_PEER_ERROR:
+        printf("Error code %d: %s\n", ntohs(ap->th_code), ap->th_msg);
+        break;
+    default:
+        break;
     }
-
-  abort_packets:
-    xfree(lengths);
-    xfree(packets);
   abort:
     if (file)
         fclose(file);
@@ -228,14 +264,19 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     union sock_addr from;
     socklen_t fromlen;
     FILE *file = NULL;
-    volatile int n, size, packets_in_window = 0, first_data = 0, final;
+    struct client_xfer_context context;
+    struct tftp_xfer xfer;
+    struct tftp_xfer_result result;
+    const struct tftphdr * volatile initial_reply = NULL;
+    volatile int initial_reply_len = 0;
+    volatile int initial_packet_len = -1;
+    int n, size;
     int convert = !strcmp(mode, "netascii");
-    volatile unsigned int window;
+    unsigned int window;
     unsigned int negotiated_block, negotiated_window;
     int requested_options = blocksize != SEGSIZE || requested_window;
-    volatile uint16_t block = 1, last_acked = 0;
-    uint16_t opcode, packet_block;
-    volatile unsigned long amount = 0;
+    uint16_t opcode;
+    volatile uintmax_t amount = 0;
 
     startclock();
     file = fdopen(fd, convert ? "wt" : "wb");
@@ -291,111 +332,58 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
                                     negotiated_window, false);
             ap->th_opcode = htons((uint16_t)ACK);
             ap->th_block = 0;
-            size = 4;
-            last_acked = 0;
+            initial_reply = ap;
+            initial_reply_len = 4;
         } else if (opcode == DATA && n >= 4 && ntohs(dp->th_block) == 1) {
             segsize = SEGSIZE;
             window = 1;         /* Peer ignored requested options. */
-            first_data = 1;
+            initial_packet_len = n;
             break;
         } else {
             continue;
         }
-        /* An RRQ OACK is acknowledged with ACK 0 before DATA 1. */
-        if (trace)
-            tpacket("sent", ap, size);
-        if (sendto(f, ap, size, 0, &peeraddr.sa, SOCKLEN(&peeraddr)) != size) {
-            perror("tftp: sendto");
-            goto abort;
-        }
-        write_behind(file, convert);
         break;
     }
 
-    for (;;) {
-        int timedout;
+    context.file = file;
+    context.convert = convert;
+    xfer.file = file;
+    xfer.convert = convert;
+    xfer.blocksize = segsize;
+    xfer.windowsize = window;
+    xfer.rollover = 0;
+    xfer.resend_oack = 0;
+    xfer.control = ackbuf;
+    xfer.control_size = sizeof(ackbuf);
+    xfer.context = &context;
+    xfer.ops = &client_xfer_ops;
+    tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len,
+                   initial_packet_len < 0 ? NULL : dp, initial_packet_len,
+                   &result);
+    amount = result.bytes;
 
-        timeout = 0;
-        timedout = sigsetjmp(timeoutbuf, 1);
-        /*
-         * On timeout, ACK the last completed window.  This is also ACK 0
-         * immediately after an OACK, which makes OACK loss recoverable.
-         */
-        if (timedout && !first_data) {
-            ap->th_opcode = htons((uint16_t)ACK);
-            ap->th_block = htons(last_acked);
-            if (trace)
-                tpacket("sent", ap, 4);
-            if (sendto(f, ap, 4, 0, &peeraddr.sa,
-                       SOCKLEN(&peeraddr)) != 4) {
-                perror("tftp: sendto");
-                goto abort;
-            }
-            write_behind(file, convert);
-        }
-        if (!first_data) {
-            alarm(rexmtval);
-            fromlen = sizeof(from);
-            n = recvfrom(f, dp, MAX_SEGSIZE + 4, 0, &from.sa, &fromlen);
-            alarm(0);
-            if (n < 0) {
-                perror("tftp: recvfrom");
-                goto abort;
-            }
-            if (trace)
-                tpacket("received", dp, n);
-        }
-        first_data = 0;
-        if (n < 4)
-            continue;
-        opcode = ntohs(dp->th_opcode);
-        packet_block = ntohs(dp->th_block);
-        if (opcode == ERROR) {
-            printf("Error code %d: %s\n", packet_block, dp->th_msg);
-            goto abort;
-        }
-        if (opcode != DATA || n < 4)
-            continue;
-        if (packet_block != block) {
-            if (packet_block == last_acked) {
-                ap->th_opcode = htons((uint16_t)ACK);
-                ap->th_block = htons(last_acked);
-                if (trace)
-                    tpacket("sent", ap, 4);
-                (void)sendto(f, ap, 4, 0, &peeraddr.sa,
-                             SOCKLEN(&peeraddr));
-            }
-            continue;
-        }
-        if (n - 4 > segsize) {
-            nak(EBADOP, "Data packet too large");
-            goto abort;
-        }
-        size = writeit(file, &dp, n - 4, convert);
-        if (size < 0) {
-            nak(errno + 100, NULL);
-            goto abort;
-        }
-        amount += size;
-        packets_in_window++;
-        block++;
-        final = size != segsize;
-        if (final || packets_in_window == (int)window) {
-            ap->th_opcode = htons((uint16_t)ACK);
-            ap->th_block = htons(packet_block);
-            last_acked = packet_block;
-            packets_in_window = 0;
-            if (trace)
-                tpacket("sent", ap, 4);
-            if (sendto(f, ap, 4, 0, &peeraddr.sa,
-                       SOCKLEN(&peeraddr)) != 4) {
-                perror("tftp: sendto");
-                goto abort;
-            }
-            write_behind(file, convert);
-            if (final)
-                break;
-        }
+    switch (result.status) {
+    case TFTP_XFER_BAD_DATA:
+        nak(EBADOP, "Data packet too large");
+        break;
+    case TFTP_XFER_WRITE_ERROR:
+        if (result.io_result < 0)
+            nak(result.error + 100, NULL);
+        break;
+    case TFTP_XFER_SEND_ERROR:
+        errno = result.error;
+        perror("tftp: sendto");
+        break;
+    case TFTP_XFER_RECV_ERROR:
+        errno = result.error;
+        perror("tftp: recvfrom");
+        break;
+    case TFTP_XFER_PEER_ERROR:
+        printf("Error code %d: %s\n", ntohs(result.packet->th_code),
+               result.packet->th_msg);
+        break;
+    default:
+        break;
     }
 
   abort:
@@ -709,5 +697,5 @@ static void timer(int sig)
         siglongjmp(toplevel, -1);
     }
     errno = save_errno;
-    siglongjmp(timeoutbuf, 1);
+    siglongjmp(*active_timeoutbuf, 1);
 }

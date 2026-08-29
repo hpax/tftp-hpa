@@ -25,6 +25,7 @@ struct tftp_xfer_result {
     int error;
     uintmax_t bytes;
     uint16_t last_block;
+    const struct tftphdr *packet;
 };
 
 /*

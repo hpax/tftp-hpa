@@ -53,6 +53,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     uint16_t expected_ack;
 
     result->last_block = 0;
+    result->packet = NULL;
     packetsize = ((size_t)xfer->blocksize + 5) & ~(size_t)1;
     packets = xcalloc(xfer->windowsize, packetsize);
     lengths = xcalloc(xfer->windowsize, sizeof(*lengths));
@@ -107,6 +108,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
             opcode = ntohs(ap->th_opcode);
             packet_block = ntohs(ap->th_block);
             if (opcode == ERROR) {
+                result->packet = ap;
                 finish(xfer, result, TFTP_XFER_PEER_ERROR, n, 0, bytes);
                 goto out;
             }
@@ -156,6 +158,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     int restarted;
 
     result->last_block = 0;
+    result->packet = NULL;
     dp = w_init();
     if (initial_packet_pending)
         dp = initial_packet;
@@ -184,6 +187,8 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         if (initial_packet_pending) {
             n = initial_packet_len;
             initial_packet_pending = 0;
+            opcode = ntohs(dp->th_opcode);
+            packet_block = ntohs(dp->th_block);
         } else {
             xfer->ops->wait_begin(xfer->context);
             for (;;) {
@@ -200,6 +205,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                 opcode = ntohs(dp->th_opcode);
                 packet_block = ntohs(dp->th_block);
                 if (opcode == ERROR) {
+                    result->packet = dp;
                     finish(xfer, result, TFTP_XFER_PEER_ERROR, n, 0,
                            bytes);
                     return;
