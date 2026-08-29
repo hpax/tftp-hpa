@@ -13,10 +13,8 @@ OBJS = tftp.$(O) main.$(O)
 
 all: tftp$(X) tftp.1
 
-tftp$(X): $(OBJS)
+tftp$(X): $(OBJS) $(filter %.a,$(TFTP_LIBS))
 	$(CC) $(CFLAGS) $(LDFLAGS) -o tftp$(X) $(OBJS) $(TFTP_LIBS)
-
-$(OBJS): ../common/tftpsubs.h
 
 tftp.1: tftp.1.in ../version
 	sed -e 's/@@VERSION@@/$(VERSION)/g' < tftp.1.in > tftp.1
