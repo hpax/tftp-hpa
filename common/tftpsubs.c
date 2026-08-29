@@ -25,14 +25,17 @@ int segsize = SEGSIZE;          /* Default segsize */
 
 #define TFTP_SOCKET_BUFFER_MIN	(256U * 1024U)
 #define TFTP_SOCKET_BUFFER_MAX	(4U * 1024U * 1024U)
-#define TFTP_SOCKET_BUFFER_WINDOWS 8U
+#define TFTP_SOCKET_BUFFER_WINDOWS 2
+
+/* A somewhat conservative estimate for all packet overhead */
+#define TFTP_SOCKET_BUFFER_OVERHEAD	256
 
 void tftp_set_socket_buffers(int fd, unsigned int blocksize,
                              unsigned int windowsize, bool is_send)
 {
 #if defined(SO_SNDBUF) && defined(SO_RCVBUF)
     int whichbuf = is_send ? SO_SNDBUF : SO_RCVBUF;
-    size_t packetsize = (size_t)blocksize + 4;
+    size_t packetsize = (size_t)blocksize + TFTP_SOCKET_BUFFER_OVERHEAD;
     unsigned int buffersize;
 
     buffersize = windowsize * packetsize * TFTP_SOCKET_BUFFER_WINDOWS;
