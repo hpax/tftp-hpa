@@ -52,6 +52,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     uint16_t packet_block;
     uint16_t expected_ack;
 
+    result->last_block = 0;
     packetsize = ((size_t)xfer->blocksize + 5) & ~(size_t)1;
     packets = xcalloc(xfer->windowsize, packetsize);
     lengths = xcalloc(xfer->windowsize, sizeof(*lengths));
@@ -79,7 +80,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
         } while (packet_count < (int)xfer->windowsize && !final);
 
         restarted = sigsetjmp(retrybuf, 1);
-        xfer->ops->retry_enter(xfer->context, retrybuf, restarted);
+        xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
       resend_window:
         for (n = 0; n < packet_count; n++) {
             dp = (struct tftphdr *)(packets + (size_t)n * packetsize);
@@ -154,13 +155,14 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     int final;
     int restarted;
 
+    result->last_block = 0;
     dp = w_init();
     if (initial_packet_pending)
         dp = initial_packet;
 
     for (;;) {
         restarted = sigsetjmp(retrybuf, 1);
-        xfer->ops->retry_enter(xfer->context, retrybuf, restarted);
+        xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
         if (initial_reply_pending || restarted) {
             if (initial_reply_pending) {
                 reply = initial_reply;
@@ -241,6 +243,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             }
             xfer->ops->flush(xfer->context);
             if (final) {
+                result->last_block = last_acked;
                 finish(xfer, result, TFTP_XFER_OK, 0, 0, bytes);
                 return;
             }

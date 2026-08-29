@@ -24,6 +24,7 @@ struct tftp_xfer_result {
     int io_result;
     int error;
     uintmax_t bytes;
+    uint16_t last_block;
 };
 
 /*
@@ -37,7 +38,7 @@ struct tftp_xfer_ops {
     int (*recv)(void *, void *, int);
     void (*received)(void *, const struct tftphdr *, int);
     void (*drain)(void *);
-    void (*retry_enter)(void *, sigjmp_buf, int);
+    void (*retry_enter)(void *, sigjmp_buf *, int);
     void (*retry_leave)(void *);
     void (*wait_begin)(void *);
     void (*flush)(void *);
