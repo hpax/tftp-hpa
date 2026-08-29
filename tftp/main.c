@@ -164,22 +164,63 @@ static const struct cmd cmdtab[] = {
 static const struct cmd *getcmd(const char *, const char **errtype);
 char *tail(char *);
 
-static void usage(int errcode)
+static noreturn void usage(int errcode)
 {
-    fprintf(stderr,
-            "Usage: %s -[vl4%s][-m mode][-B block-size][-W window-size] [host [port]] [-c command...]\n",
-            _progname, WITH_IPV6 ? "6" : "");
+    fprintf(errcode ? stderr : stdout,
+            "Usage: %s [options] [host [port]] [-c command...]\n"
+            "  Options:\n"
+            "    -V, --version              print version number and exit\n"
+            "    -h, --help                 print this help text and exit\n"
+#ifdef HAVE_IPV6
+            "    -4. --ipv4                 only use IPv4, no IPv6\n"
+            "    -6. --ipv6                 only use IPv6, no IPv4\n"
+#endif
+            "    -v, --verbose              increase logging verbosity\n"
+            "    -l, --literal              disable host:path syntax\n"
+            "    -m, --mode mode            set the transfer mode (netascii, octet)\n"
+            "    -a, --ascii                alias for --mode netascii\n"
+            "        --netascii             alias for --mode netascii\n"
+            "        --text                 alias for --mode netascii\n"
+            "    -b, --binary               alias for --mode octet\n"
+            "        --octet                alias for --mode octet\n"
+            "    -R, --port-range min:max   use emhermeral ports in the given range\n"
+            "    -B, --blocksize size       set the requested transfer block size\n"
+            "    -W, --windowsize size      set the requested transfer window size\n"
+            "    -c, --command command      execute \"command\", then exit (must be last)\n",
+            _progname);
+
     exit(errcode);
 }
+
+static const struct option long_options[] = {
+    { "ipv4",       no_argument,       NULL, '4' },
+    { "ipv6",       no_argument,       NULL, '6' },
+    { "verbose",    no_argument,       NULL, 'v' },
+    { "version",    no_argument,       NULL, 'V' },
+    { "literal",    no_argument,       NULL, 'l' },
+    { "mode",       required_argument, NULL, 'm' },
+    { "command",    no_argument,       NULL, 'c' },
+    { "port-range", required_argument, NULL, 'R' },
+    { "blocksize",  required_argument, NULL, 'B' },
+    { "windowsize", required_argument, NULL, 'W' },
+    { "ascii",      no_argument,       NULL, 'a' },
+    { "text",       no_argument,       NULL, 'a' },
+    { "netascii",   no_argument,       NULL, 'a' },
+    { "binary",     no_argument,       NULL, 'b' },
+    { "octet",      no_argument,       NULL, 'b' },
+    { "help",       no_argument,       NULL, 'h' },
+    { NULL,         0,                 NULL, 0 }
+};
+
+static const char short_options[] = "+46vVlm:cR:B:W:w:h";
 
 int main(int argc, char *argv[])
 {
     union sock_addr sa;
-    int arg;
+    int optc;
     static int pargc, peerargc;
     static int iscmd = 0;
     static char **pargv;
-    const char *optx;
     char *peerargv[3];
 
     set_progname(argv[0]);
@@ -189,118 +230,120 @@ int main(int argc, char *argv[])
     peerargv[0] = argv[0];
     peerargc = 1;
 
-    for (arg = 1; !iscmd && arg < argc; arg++) {
-        if (argv[arg][0] == '-') {
-            for (optx = &argv[arg][1]; *optx; optx++) {
-                switch (*optx) {
-                case '4':
-                    ai_fam = AF_INET;
-                    break;
-#ifdef HAVE_IPV6
-                case '6':
-                    ai_fam = AF_INET6;
-                    break;
-#endif
-                case 'v':
-                    verbose = 1;
-                    break;
-                case 'V':
-                    /* Print version and configuration to stdout and exit */
-                    printf("%s\n", TFTP_CONFIG_STR);
-                    exit(0);
-                case 'l':
-                    literal = 1;
-                    break;
-                case 'm':
-                    if (++arg >= argc)
-                        usage(EX_USAGE);
-                    {
-                        const struct modes *p;
-
-                        for (p = modes; p->m_name; p++) {
-                            if (!strcmp(argv[arg], p->m_name))
-                                break;
-                        }
-                        if (p->m_name) {
-                            settftpmode(p);
-                        } else {
-                            fprintf(stderr, "%s: invalid mode: %s\n",
-                                    argv[0], argv[arg]);
-                            exit(EX_USAGE);
-                        }
-                    }
-                    break;
-                case 'c':
-                    iscmd = 1;
-                    break;
-                case 'R':
-                    if (++arg >= argc)
-                        usage(EX_USAGE);
-                    if (sscanf
-                        (argv[arg], "%u:%u", &portrange_from,
-                         &portrange_to) != 2
-                        || !portrange_from
-                        || portrange_from > portrange_to
-                        || portrange_to > 65535) {
-                        fprintf(stderr, "Bad port range: %s\n", argv[arg]);
-                        exit(EX_USAGE);
-                    }
-                    portrange = 1;
-                    break;
-                case 'B':
-                {
-                    char *end;
-                    unsigned long value;
-
-                    if (++arg >= argc)
-                        usage(EX_USAGE);
-                    errno = 0;
-                    value = strtoul(argv[arg], &end, 10);
-                    if (errno || *argv[arg] == '\0' || *end ||
-                        value < 8 || value > MAX_SEGSIZE) {
-                        fprintf(stderr, "Bad block size: %s (8-%d)\n",
-                                argv[arg], MAX_SEGSIZE);
-                        exit(EX_USAGE);
-                    }
-                    blocksize = (unsigned int)value;
-                    break;
-                }
-                case 'W':
-                case 'w':
-                {
-                    char *end;
-                    unsigned long value;
-
-                    if (++arg >= argc)
-                        usage(EX_USAGE);
-                    errno = 0;
-                    value = strtoul(argv[arg], &end, 10);
-                    if (errno || *argv[arg] == '\0' || *end ||
-                        value < 1 || value > TFTP_MAX_WINDOWSIZE) {
-                        fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
-                                argv[arg], TFTP_MAX_WINDOWSIZE);
-                        exit(EX_USAGE);
-                    }
-                    windowsize = (unsigned int)value;
-                    break;
-                }
-                case 'h':
-                default:
-                    usage(*optx == 'h' ? 0 : EX_USAGE);
-                }
-            }
-        } else {
+    while (!iscmd) {
+        optc = getopt_long(argc, argv, short_options, long_options,
+                           NULL);
+        if (optc == -1) {
+            if (optind == argc)
+                break;
             if (peerargc >= 3)
                 usage(EX_USAGE);
+            peerargv[peerargc++] = argv[optind++];
+            continue;
+        }
 
-            peerargv[peerargc++] = argv[arg];
+        switch (optc) {
+        case '4':
+            ai_fam = AF_INET;
+            break;
+        case '6':
+#ifdef HAVE_IPV6
+            ai_fam = AF_INET6;
+#else
+            fprintf(stderr, "%s: this version compiled without IPv6 support\n",
+                    _progname);
+            exit(EX_UNAVAILABLE);
+#endif
+            break;
+        case 'v':
+            verbose = 1;
+            break;
+        case 'V':
+            /* Print version and configuration to stdout and exit */
+            printf("%s\n", TFTP_CONFIG_STR);
+            exit(0);
+        case 'b':
+            settftpmode(MODE_OCTET);
+            break;
+        case 'a':
+            settftpmode(MODE_NETASCII);
+            break;
+        case 'l':
+            literal = 1;
+            break;
+        case 'm':
+        {
+            const struct modes *p;
+
+            for (p = modes; p->m_name; p++) {
+                if (!strcmp(optarg, p->m_name))
+                    break;
+            }
+            if (p->m_name) {
+                settftpmode(p);
+            } else {
+                fprintf(stderr, "%s: invalid mode: %s\n", argv[0], optarg);
+                exit(EX_USAGE);
+            }
+            break;
+        }
+        case 'c':
+            iscmd = 1;
+            break;
+        case 'R':
+            if (sscanf(optarg, "%u:%u", &portrange_from, &portrange_to) != 2
+                || !portrange_from || portrange_from > portrange_to
+                || portrange_to > 65535) {
+                fprintf(stderr, "Bad port range: %s\n", optarg);
+                exit(EX_USAGE);
+            }
+            portrange = 1;
+            break;
+        case 'B':
+        {
+            char *end;
+            unsigned long value;
+
+            errno = 0;
+            value = strtoul(optarg, &end, 10);
+            if (errno || *optarg == '\0' || *end ||
+                value < 8 || value > MAX_SEGSIZE) {
+                fprintf(stderr, "Bad block size: %s (8-%d)\n",
+                        optarg, MAX_SEGSIZE);
+                exit(EX_USAGE);
+            }
+            blocksize = (unsigned int)value;
+            break;
+        }
+        case 'W':
+        case 'w':
+        {
+            char *end;
+            unsigned long value;
+
+            errno = 0;
+            value = strtoul(optarg, &end, 10);
+            if (errno || *optarg == '\0' || *end ||
+                value < 1 || value > TFTP_MAX_WINDOWSIZE) {
+                fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
+                        optarg, TFTP_MAX_WINDOWSIZE);
+                exit(EX_USAGE);
+            }
+            windowsize = (unsigned int)value;
+            break;
+        }
+        case 'h':
+            usage(0);
+            break;
+        default:
+            usage(EX_USAGE);
         }
     }
 
     ai_fam_sock = ai_fam;
 
-    pargv = argv + arg;
-    pargc = argc - arg;
+    pargv = argv + optind;
+    pargc = argc - optind;
 
     sp = getservbyname("tftp", "udp");
     if (sp == 0) {
