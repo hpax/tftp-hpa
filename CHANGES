@@ -35,8 +35,6 @@ Changes in 6.0:
 
 	Add interactive blocksize and windowsize commands to the client.
 
-
-Changes in 5.5:
 	tftpd now supports multiple --address arguments to bind to
 	multiple addresses. Furthermore, if --address is given a
 	domain name that resolves to multiple addresses, tftpd will
