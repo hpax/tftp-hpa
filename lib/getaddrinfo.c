@@ -33,7 +33,7 @@ void freeaddrinfo(struct addrinfo *res)
 int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
                 struct addrinfo **res)
 {
-    struct hostent  *host;
+    const struct hostent *host;
     struct sockaddr *sa;
     int size = 0;
 

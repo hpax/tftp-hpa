@@ -23,7 +23,7 @@ const char *inet_ntop(int af, const void *src,
 
     switch(af) {
     case AF_INET:
-        p = inet_ntoa(*((struct in_addr *)src));
+        p = inet_ntoa(*((const struct in_addr *)src));
         if (p) {
             if (cnt <= strlen(p)) {
                 errno = ENOSPC;

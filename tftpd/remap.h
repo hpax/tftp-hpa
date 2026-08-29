@@ -29,7 +29,7 @@ struct rule;
  * Return (size_t)-1 for an invalid macro, which then will be handled
  * by the substitution code.
  */
-typedef size_t (*match_pattern_callback) (char, char **);
+typedef size_t (*match_pattern_callback) (char, const char **);
 
 /* Read a rule file */
 struct rule *parserulefile(FILE *);

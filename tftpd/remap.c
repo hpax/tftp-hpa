@@ -165,7 +165,7 @@ static const char *xform_out(struct xform_state *xs, const char *p, size_t len)
  */
 #define MATCHONLY ((size_t)-1)
 
-static size_t null_macrosub(char macro, char **macrodata)
+static size_t null_macrosub(char macro, const char **macrodata)
 {
     (void)macro;
     (void)macrodata;
@@ -259,7 +259,7 @@ do_genmatchstring(char *string, const char *pattern,
 
             default:
             {
-                char *macrodata;
+                const char *macrodata;
                 size_t sublen = macrosub(macro, &macrodata);
                 if (sublen != (size_t)-1) {
                     xform_out(&xs, macrodata, sublen);

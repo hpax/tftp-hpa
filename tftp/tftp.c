@@ -30,8 +30,8 @@ extern unsigned int windowsize;
  * packets.  It needs to accommodate requests containing RFC 2347 options.
  */
 #define REQBUFSIZE MAX_SEGSIZE+4
-char ackbuf[REQBUFSIZE];
-int timeout;
+static char ackbuf[REQBUFSIZE];
+static int timeout;
 static sigjmp_buf timeoutbuf;
 
 static void nak(int, const char *);
@@ -43,7 +43,7 @@ static void printstats(const char *, uintmax_t);
 static void startclock(void);
 static void stopclock(void);
 static void timer(int);
-static void tpacket(const char *, struct tftphdr *, int);
+static void tpacket(const char *, const struct tftphdr *, int);
 
 /*
  * Send the requested file.
@@ -53,7 +53,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
 {
     struct tftphdr *dp, *ap;
     char response[REQBUFSIZE];
-    struct tftphdr *rp = (struct tftphdr *)response;
+    const struct tftphdr *rp = (const struct tftphdr *)response;
     union sock_addr from;
     socklen_t fromlen;
     FILE *file = NULL;
@@ -581,11 +581,11 @@ static void nak(int error, const char *msg)
         perror("nak");
 }
 
-static void tpacket(const char *s, struct tftphdr *tp, int n)
+static void tpacket(const char *s, const struct tftphdr *tp, int n)
 {
-    static const char *opcodes[] =
+    static const char *const opcodes[] =
         { "#0", "RRQ", "WRQ", "DATA", "ACK", "ERROR", "OACK" };
-    char *cp, *file;
+    const char *cp, *file;
     uint16_t op = ntohs((uint16_t) tp->th_opcode);
 
     if (op < RRQ || op > OACK)
@@ -597,7 +597,7 @@ static void tpacket(const char *s, struct tftphdr *tp, int n)
     case RRQ:
     case WRQ:
         n -= 2;
-        file = cp = (char *)&(tp->th_stuff);
+        file = cp = (const char *)&(tp->th_stuff);
         cp = strchr(cp, '\0');
         printf("<file=%s, mode=%s>\n", file, cp + 1);
         break;
@@ -620,8 +620,8 @@ static void tpacket(const char *s, struct tftphdr *tp, int n)
     }
 }
 
-struct timeval tstart;
-struct timeval tstop;
+static struct timeval tstart;
+static struct timeval tstop;
 
 static void startclock(void)
 {
@@ -638,13 +638,13 @@ static void stopclock(void)
 #define PWS_EXACT  2
 static bool print_with_suffix(double val, unsigned int flags)
 {
-    static const char *dsuffixes[] = {
+    static const char *const dsuffixes[] = {
         "", "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q", NULL
     };
-    static const char *bsuffixes[] = {
+    static const char *const bsuffixes[] = {
         "", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi", "Yi", "Ri", "Qi", NULL
     };
-    const char **suffix = flags & PWS_BINARY ? bsuffixes : dsuffixes;
+    const char *const *suffix = flags & PWS_BINARY ? bsuffixes : dsuffixes;
     double divisor = (flags & PWS_BINARY) ? 1024.0 : 1000.0;
     int decimals;
     bool with_suffix = false;

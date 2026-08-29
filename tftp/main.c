@@ -49,64 +49,64 @@ static const struct modes modes[] = {
 #define MODE_DEFAULT  MODE_NETASCII
 
 #ifdef HAVE_IPV6
-int ai_fam = AF_UNSPEC;
-int ai_fam_sock = AF_UNSPEC;
+static int ai_fam = AF_UNSPEC;
+static int ai_fam_sock = AF_UNSPEC;
 #else
-int ai_fam = AF_INET;
-int ai_fam_sock = AF_INET;
+static int ai_fam = AF_INET;
+static int ai_fam_sock = AF_INET;
 #endif
 
 union sock_addr peeraddr;
 int f = -1;
-uint16_t port;
+static uint16_t port;
 int trace;
 int verbose;
-int literal;
-int connected;
-const struct modes *mode;
+static int literal;
+static int connected;
+static const struct modes *mode;
 #ifdef WITH_READLINE
-char *line = NULL;
+static char *line = NULL;
 #else
-char line[LBUFLEN];
+static char line[LBUFLEN];
 #endif
-int margc;
+static int margc;
 #define MARGVSIZE 20
-char *margv[MARGVSIZE];
-const char *prompt = "tftp> ";
+static char *margv[MARGVSIZE];
+static const char *const prompt = "tftp> ";
 sigjmp_buf toplevel;
-void intr(int);
-struct servent *sp;
-int portrange = 0;
-unsigned int portrange_from = 0;
-unsigned int portrange_to = 0;
+static void intr(int);
+static const struct servent *sp;
+static int portrange = 0;
+static unsigned int portrange_from = 0;
+static unsigned int portrange_to = 0;
 unsigned int blocksize = SEGSIZE;
 unsigned int windowsize;
 
-void get(int, char **);
-void help(int, char **);
-void modecmd(int, char **);
-void put(int, char **);
-void quit(int, char **);
-void setascii(int, char **);
-void setbinary(int, char **);
-void setblocksize(int, char **);
-void setpeer(int, char **);
-void setrexmt(int, char **);
-void settimeout(int, char **);
-void settrace(int, char **);
+static void get(int, char **);
+static void help(int, char **);
+static void modecmd(int, char **);
+static void put(int, char **);
+static void quit(int, char **);
+static void setascii(int, char **);
+static void setbinary(int, char **);
+static void setblocksize(int, char **);
+static void setpeer(int, char **);
+static void setrexmt(int, char **);
+static void settimeout(int, char **);
+static void settrace(int, char **);
 static void set_verbosity(const char *, bool);
-void setverbose(int, char **);
-void status(int, char **);
-void setliteral(int, char **);
-void setwindowsize(int, char **);
+static void setverbose(int, char **);
+static void status(int, char **);
+static void setliteral(int, char **);
+static void setwindowsize(int, char **);
 
 static void command(void);
 
-static void getusage(char *);
+static void getusage(const char *);
 static int makeargv(char *, char **);
 static int parse_uint_range(const char *, unsigned int, unsigned int,
                             unsigned int *);
-static void putusage(char *);
+static void putusage(const char *);
 static void settftpmode(const struct modes *);
 
 #define HELPINDENT (sizeof("connect"))
@@ -173,7 +173,7 @@ static const struct cmd cmdtab[] = {
 };
 
 static const struct cmd *getcmd(const char *, const char **errtype);
-char *tail(char *);
+static char *tail(char *);
 
 static noreturn void usage(int errcode)
 {
@@ -361,15 +361,18 @@ int main(int argc, char *argv[])
 
     sp = getservbyname("tftp", "udp");
     if (sp == 0) {
+        struct servent *fallback_sp;
+
         /* Use canned values */
         if (verbose)
             fprintf(stderr,
                     "tftp: tftp/udp: unknown service, faking it...\n");
-        sp = xmalloc(sizeof(struct servent));
-        sp->s_name = (char *)"tftp";
-        sp->s_aliases = NULL;
-        sp->s_port = htons(IPPORT_TFTP);
-        sp->s_proto = (char *)"udp";
+        fallback_sp = xmalloc(sizeof(*fallback_sp));
+        fallback_sp->s_name = (char *)"tftp";
+        fallback_sp->s_aliases = NULL;
+        fallback_sp->s_port = htons(IPPORT_TFTP);
+        fallback_sp->s_proto = (char *)"udp";
+        sp = fallback_sp;
     }
 
     tftp_signal(SIGINT, intr, 0);
@@ -440,7 +443,7 @@ int main(int argc, char *argv[])
     return 0;                   /* Never reached */
 }
 
-char *hostname;
+static char *hostname;
 
 /* Called when a command is incomplete; modifies
    the global variable "line" */
@@ -480,7 +483,7 @@ static void getmoreargs(const char *partial, const char *mprompt)
 #endif
 }
 
-void setpeer(int argc, char *argv[])
+static void setpeer(int argc, char *argv[])
 {
     int err;
 
@@ -527,7 +530,7 @@ void setpeer(int argc, char *argv[])
     }
     port = sp->s_port;
     if (argc == 3) {
-        struct servent *usp;
+        const struct servent *usp;
         usp = getservbyname(argv[2], "udp");
         if (usp) {
             port = usp->s_port;
@@ -545,18 +548,19 @@ void setpeer(int argc, char *argv[])
     }
 
     if (verbose) {
-        char tmp[INET6_ADDRSTRLEN], *tp;
-        tp = (char *)inet_ntop(peeraddr.sa.sa_family, SOCKADDR_P(&peeraddr),
-                               tmp, INET6_ADDRSTRLEN);
+        char tmp[INET6_ADDRSTRLEN];
+        const char *tp;
+        tp = inet_ntop(peeraddr.sa.sa_family, SOCKADDR_P(&peeraddr),
+                       tmp, INET6_ADDRSTRLEN);
         if (!tp)
-            tp = (char *)"???";
+            tp = "???";
         printf("Connected to %s (%s), port %u\n",
                hostname, tp, (unsigned int)ntohs(port));
     }
     connected = 1;
 }
 
-void modecmd(int argc, char *argv[])
+static void modecmd(int argc, char *argv[])
 {
     const struct modes *p;
     const char *sep;
@@ -588,14 +592,14 @@ void modecmd(int argc, char *argv[])
     return;
 }
 
-void setbinary(int argc, char *argv[])
+static void setbinary(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     settftpmode(MODE_OCTET);
 }
 
-void setascii(int argc, char *argv[])
+static void setascii(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -612,11 +616,12 @@ static void settftpmode(const struct modes *newmode)
 /*
  * Send file(s).
  */
-void put(int argc, char *argv[])
+static void put(int argc, char *argv[])
 {
     int fd;
     int n, err;
-    char *cp, *targ;
+    char *cp;
+    char *targ;
 
     if (argc < 2) {
         getmoreargs("send ", "(file) ");
@@ -691,7 +696,7 @@ void put(int argc, char *argv[])
     }
 }
 
-static void putusage(char *s)
+static void putusage(const char *s)
 {
     printf("usage: %s file ... host:target, or\n", s);
     printf("       %s file ... target (when already connected)\n", s);
@@ -700,7 +705,7 @@ static void putusage(char *s)
 /*
  * Receive file(s).
  */
-void get(int argc, char *argv[])
+static void get(int argc, char *argv[])
 {
     int fd;
     int n;
@@ -774,7 +779,7 @@ void get(int argc, char *argv[])
     }
 }
 
-static void getusage(char *s)
+static void getusage(const char *s)
 {
     printf("usage: %s host:file host:file ... file, or\n", s);
     printf("       %s file file ... file if connected\n", s);
@@ -782,7 +787,7 @@ static void getusage(char *s)
 
 int rexmtval = TIMEOUT;
 
-void setrexmt(int argc, char *argv[])
+static void setrexmt(int argc, char *argv[])
 {
     int t;
 
@@ -804,7 +809,7 @@ void setrexmt(int argc, char *argv[])
 
 int maxtimeout = 5 * TIMEOUT;
 
-void settimeout(int argc, char *argv[])
+static void settimeout(int argc, char *argv[])
 {
     int t;
 
@@ -824,7 +829,7 @@ void settimeout(int argc, char *argv[])
         maxtimeout = t;
 }
 
-void setblocksize(int argc, char *argv[])
+static void setblocksize(int argc, char *argv[])
 {
     if (argc < 2) {
         getmoreargs("blocksize ", "(size) ");
@@ -841,7 +846,7 @@ void setblocksize(int argc, char *argv[])
     }
 }
 
-void setwindowsize(int argc, char *argv[])
+static void setwindowsize(int argc, char *argv[])
 {
     if (argc < 2) {
         getmoreargs("windowsize ", "(size) ");
@@ -858,7 +863,7 @@ void setwindowsize(int argc, char *argv[])
     }
 }
 
-void setliteral(int argc, char *argv[])
+static void setliteral(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -866,7 +871,7 @@ void setliteral(int argc, char *argv[])
     printf("Literal mode %s.\n", literal ? "on" : "off");
 }
 
-void status(int argc, char *argv[])
+static void status(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -883,7 +888,7 @@ void status(int argc, char *argv[])
            windowsize ? windowsize : 1);
 }
 
-void intr(int sig)
+static void intr(int sig)
 {
     (void)sig;                  /* Quiet unused warning */
 
@@ -892,7 +897,7 @@ void intr(int sig)
     siglongjmp(toplevel, -1);
 }
 
-char *tail(char *filename)
+static char *tail(char *filename)
 {
     char *s;
 
@@ -1023,7 +1028,7 @@ static int makeargv(char *str, char **argp)
     return argc;
 }
 
-void quit(int argc, char *argv[])
+static void quit(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -1033,7 +1038,7 @@ void quit(int argc, char *argv[])
 /*
  * Help command.
  */
-void help(int argc, char *argv[])
+static void help(int argc, char *argv[])
 {
     const struct cmd *c;
 
@@ -1057,7 +1062,7 @@ void help(int argc, char *argv[])
     }
 }
 
-void settrace(int argc, char *argv[])
+static void settrace(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -1105,7 +1110,7 @@ static void set_verbosity(const char *to, bool startup)
         printf("Verbosity set to level %d (%s).\n", verbose, name);
 }
 
-void setverbose(int argc, char *argv[])
+static void setverbose(int argc, char *argv[])
 {
     (void)argc;
     set_verbosity(argv[1], false);

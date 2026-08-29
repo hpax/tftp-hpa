@@ -58,7 +58,8 @@ void tftp_set_socket_buffers(int fd, unsigned int blocksize,
 struct bf {
     int counter;                /* size of data in buffer, or flag */
     char buf[PKTSIZE];          /* room for data packet */
-} bfs[2];
+};
+static struct bf bfs[2];
 
                                 /* Values for bf.counter  */
 #define BF_ALLOC -3             /* alloc'd but not yet filled */
@@ -69,8 +70,8 @@ static int nextone;             /* index of next buffer to use */
 static int current;             /* index of buffer in use */
 
                                 /* control flags for crlf conversions */
-int newline = 0;                /* fillbuf: in middle of newline expansion */
-int prevchar = -1;              /* putbuf: previous char (cr check) */
+static int newline = 0;         /* fillbuf: in middle of newline expansion */
+static int prevchar = -1;       /* putbuf: previous char (cr check) */
 
 static struct tftphdr *rw_init(int);
 

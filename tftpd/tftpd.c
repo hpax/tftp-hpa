@@ -77,7 +77,8 @@ static uintmax_t max_windowbytes = MAX_WINDOWBYTES;
 static unsigned int windowsize = 1;
 static uintmax_t requested_windowsize;
 
-static char tmpbuf[INET6_ADDRSTRLEN], *tmp_p;
+static char tmpbuf[INET6_ADDRSTRLEN];
+static const char *tmp_p;
 
 static union sock_addr from;
 static off_t tsize;
@@ -87,11 +88,11 @@ static int ndirs;
 static const char * const **dirs;
 
 static int secure = 0;
-int cancreate = 0;
-int unixperms = 0;
-int portrange = 0;
+static int cancreate = 0;
+static int unixperms = 0;
+static int portrange = 0;
 static int reject_all_options;
-unsigned int portrange_from, portrange_to;
+static unsigned int portrange_from, portrange_to;
 int verbosity = 0;
 
 #ifdef WITH_REGEX
@@ -101,7 +102,7 @@ static void rewrite_test(FILE *);
 
 static FILE *file;
 
-int tftp(struct tftphdr *, int);
+static int tftp(struct tftphdr *, int);
 static void nak(int, const char *);
 static void timer(int);
 static void do_opt(const char *, const char *, char **);
@@ -121,7 +122,8 @@ static int set_windowsize(uintmax_t *);
 struct options {
     const char *o_opt;
     int (*o_fnc)(uintmax_t *);
-} options[] = {
+};
+static struct options options[] = {
     {"blksize",  set_blksize},
     {"blksize2", set_blksize2},
     {"tsize",    set_tsize},
@@ -337,7 +339,7 @@ enum long_only_options {
     OPT_REJECT_ALL
 };
 
-static struct option long_options[] = {
+static const struct option long_options[] = {
     { "ipv4",        0, NULL, '4' },
     { "ipv6",        0, NULL, '6' },
     { "create",      0, NULL, 'c' },
@@ -1041,7 +1043,7 @@ static const struct formats formats[] = {
 /*
  * Handle initial connection protocol.
  */
-int tftp(struct tftphdr *tp, int size)
+static int tftp(struct tftphdr *tp, int size)
 {
     char *cp, *end;
     int argn, ecode;
@@ -1094,8 +1096,8 @@ int tftp(struct tftphdr *tp, int size)
                 exit(0);
             }
             if (verbosity >= 1) {
-                tmp_p = (char *)inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
-                                          tmpbuf, INET6_ADDRSTRLEN);
+                tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
+                                  tmpbuf, INET6_ADDRSTRLEN);
                 if (!tmp_p) {
                     tmp_p = tmpbuf;
                     strcpy(tmpbuf, "???");
@@ -1416,7 +1418,7 @@ static char hexchar(unsigned char c)
     return c >= 10 ? (c + 'A' - 10) : c + '0';
 }
 
-static size_t rewrite_macros(char macro, char **output)
+static size_t rewrite_macros(char macro, const char **output)
 {
 #ifdef INET6_ADDRSTRLEN
     static char obuf[INET_ADDRSTRLEN > 64 ? INET_ADDRSTRLEN : 64];
@@ -2091,8 +2093,8 @@ static void nak(int error, const char *msg)
     length += 4;                /* Add space for header */
 
     if (verbosity >= 2) {
-        tmp_p = (char *)inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
-                                  tmpbuf, INET6_ADDRSTRLEN);
+        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
+                          tmpbuf, INET6_ADDRSTRLEN);
         if (!tmp_p) {
             tmp_p = tmpbuf;
             strcpy(tmpbuf, "???");
