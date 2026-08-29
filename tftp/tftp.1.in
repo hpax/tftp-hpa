@@ -83,8 +83,10 @@ the option.
 Force the originating (local) port number to be in the specified range of port
 numbers.
 .TP
-\fB\-v\fP, \fB\-\-verbose\fP
-Default to verbose mode.
+\fB\-v\fP, \fB\-\-verbose\fP[=\fIlevel\fP]
+Default to verbose mode. At
+.I level
+2 or higher, do not round byte counts in statistics or use suffixes.
 .TP
 \fB\-V\fP, \fB\-\-version\fP
 Print the version number and configuration to standard output, then

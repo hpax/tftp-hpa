@@ -94,6 +94,7 @@ void setpeer(int, char **);
 void setrexmt(int, char **);
 void settimeout(int, char **);
 void settrace(int, char **);
+static void set_verbosity(const char *, bool);
 void setverbose(int, char **);
 void status(int, char **);
 void setliteral(int, char **);
@@ -282,7 +283,11 @@ int main(int argc, char *argv[])
 #endif
             break;
         case 'v':
-            verbose = 1;
+            if (optarg && *optarg) {
+                set_verbosity(optarg, true);
+            } else {
+                verbose++;
+            }
             break;
         case 'V':
             /* Print version and configuration to stdout and exit */
@@ -1061,11 +1066,47 @@ void settrace(int argc, char *argv[])
     printf("Packet tracing %s.\n", trace ? "on" : "off");
 }
 
+static void set_verbosity(const char *to, bool startup)
+{
+    const char *name;
+
+    if (to) {
+        char *ep;
+        long v = strtol(to, &ep, 0);
+        if (*to && !*ep && v == (int)v) {
+            verbose = v;
+        } else {
+            if (startup) {
+                fprintf(stderr, "%s: invalid verbosity level: %s\n",
+                        _progname, to);
+                exit(EX_USAGE);
+            } else {
+                printf("Invalid verbosity level: %s\n", to);
+                return;
+            }
+        }
+    } else {
+        verbose = !verbose;
+    }
+
+    switch (verbose) {
+    case 0:
+        name = "off";
+        break;
+    case 1:
+        name = "on";
+        break;
+    default:
+        name = (verbose < 0) ? "quiet" : "high";
+        break;
+    }
+
+    if (!startup)
+        printf("Verbosity set to level %d (%s).\n", verbose, name);
+}
+
 void setverbose(int argc, char *argv[])
 {
     (void)argc;
-    (void)argv;                 /* Quiet unused warning */
-
-    verbose = !verbose;
-    printf("Verbose mode %s.\n", verbose ? "on" : "off");
+    set_verbosity(argv[1], false);
 }

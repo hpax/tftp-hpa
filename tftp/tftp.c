@@ -39,7 +39,7 @@ static int makerequest(int, const char *, struct tftphdr *, const char *,
                        unsigned int, unsigned int, size_t);
 static int parse_oack(const struct tftphdr *, int, unsigned int,
                       unsigned int, unsigned int *, unsigned int *);
-static void printstats(const char *, unsigned long);
+static void printstats(const char *, uintmax_t);
 static void startclock(void);
 static void stopclock(void);
 static void timer(int);
@@ -68,7 +68,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     int requested_options = blocksize != SEGSIZE || requested_window;
     volatile uint16_t block = 1;
     uint16_t ap_opcode, ap_block, expected_ack;
-    volatile unsigned long amount = 0;
+    volatile uintmax_t amount = 0;
 
     startclock();
     file = fdopen(fd, convert ? "rt" : "rb");
@@ -215,7 +215,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         fclose(file);
     stopclock();
     if (amount > 0)
-        printstats("Sent", (unsigned long)amount);
+        printstats("Sent", amount);
 }
 
 /*
@@ -405,7 +405,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     }
     stopclock();
     if (amount > 0)
-        printstats("Received", (unsigned long)amount);
+        printstats("Received", amount);
 }
 
 static int
@@ -634,16 +634,65 @@ static void stopclock(void)
     (void)gettimeofday(&tstop, NULL);
 }
 
-static void printstats(const char *direction, unsigned long amount)
+#define PWS_BINARY 1
+#define PWS_EXACT  2
+static bool print_with_suffix(double val, unsigned int flags)
 {
-    double delta;
+    static const char *dsuffixes[] = {
+        "", "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q", NULL
+    };
+    static const char *bsuffixes[] = {
+        "", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi", "Yi", "Ri", "Qi", NULL
+    };
+    const char **suffix = flags & PWS_BINARY ? bsuffixes : dsuffixes;
+    double divisor = (flags & PWS_BINARY) ? 1024.0 : 1000.0;
+    int decimals;
+    bool with_suffix = false;
 
-    delta = (tstop.tv_sec + (tstop.tv_usec / 1000000.0)) -
-        (tstart.tv_sec + (tstart.tv_usec / 1000000.0));
+    if (verbose < 2) {
+        while (val >= divisor && suffix[1]) {
+            suffix++;
+            val /= divisor;
+            flags &= ~PWS_EXACT; /* Not exact once divided down */
+            with_suffix = true;
+        }
+    }
+
+    decimals = 0;
+    if (!(flags & PWS_EXACT)) {
+        if (val < 9.995)
+            decimals = 2;
+        else if (val < 99.95)
+            decimals = 1;
+    }
+
+    printf("%0.*f %s", decimals, val, *suffix);
+    return with_suffix;
+}
+
+static void printstats(const char *direction, uintmax_t amount)
+{
     if (verbose) {
-        printf("%s %lu bytes in %.1f seconds", direction, amount, delta);
-        printf(" [%.0f bit/s]", (amount * 8.) / delta);
-        putchar('\n');
+        double delta = (tstop.tv_sec - tstart.tv_sec) +
+            ((int32_t)tstop.tv_usec - (int32_t)tstart.tv_usec) * 1.0e-6;
+        bool with_suffix;
+
+        fputs(direction, stdout);
+        putchar(' ');
+        if (verbose > 1 || amount < 9999) {
+            printf("%" PRIuMAX " bytes", amount);
+        } else {
+            with_suffix = print_with_suffix(amount, PWS_EXACT);
+            putchar('B');
+            if (with_suffix) {
+                fputs(" (", stdout);
+                print_with_suffix(amount, PWS_EXACT|PWS_BINARY);
+                fputs("B)", stdout);
+            }
+        }
+        printf(" in %.3f s [", delta);
+        print_with_suffix((amount << 3)/delta, 0);
+        fputs("bit/s]\n", stdout);
     }
 }
 
