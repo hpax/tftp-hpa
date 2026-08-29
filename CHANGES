@@ -1,5 +1,5 @@
 Changes in 6.0:
-	*** See note about tcpwrappers below ***
+	*** IMPORTANT: See note about tcpwrappers below ***
 
 	The TFTP windowsize option (RFC 7440) is now supported. The
 	--windowsize and --window-bytes options to tftpd can be used
@@ -28,6 +28,10 @@ Changes in 6.0:
 
 	Add the --reject-all option to disable RFC 2347 option
 	negotiation completely.
+
+	The client now supports the blksize and windowsize options.
+
+	Add support for long command line options to the client.
 
 
 Changes in 5.5:
