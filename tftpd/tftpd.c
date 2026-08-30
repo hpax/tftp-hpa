@@ -143,12 +143,13 @@ static volatile sig_atomic_t exit_signal = 0;
 static void handle_exit(int sig)
 {
     exit_signal = sig;
+    pollset_notify_signal(sig);
 }
 static void handle_reload(int sig)
 {
     reload_signal = sig;
+    pollset_notify_signal(sig);
 }
-
 
 /* Handle timeout signal or timeout event */
 static void timer(int sig)

@@ -115,4 +115,16 @@ int pick_port_bind(int sockfd, union sock_addr *myaddr,
 
 int get_nullfd(void);
 
+static inline int tftp_sigmask(int how, const sigset_t *set, sigset_t *oset)
+{
+#ifdef HAVE_PTHREAD_SIGMASK
+    return pthread_sigmask(how, set, oset);
+#else
+    int rv;
+    do {
+        rv = sigprocmask(how, set, oset) ? errno : 0;
+    } while (rv == EINTR);
+#endif
+}
+
 #endif

@@ -9,6 +9,22 @@
 #include "pollset.h"
 #include "tftpsubs.h"           /* For xcalloc()/xfree() */
 
+static sigjmp_buf pollset_sigjmpbuf;
+static volatile sig_atomic_t pollset_jmp;
+static volatile sig_atomic_t pollset_intr;
+
+void pollset_notify_signal(int sig)
+{
+    (void)sig;
+
+    if (pollset_jmp) {
+        pollset_intr = 0;
+        siglongjmp(pollset_sigjmpbuf, 1);
+    } else {
+        pollset_intr = 1;
+    }
+}
+
 struct pollset *pollset_new(void)
 {
     struct pollset *ptr = xcalloc(1, sizeof(struct pollset));
@@ -30,6 +46,7 @@ struct pollset *pollset_new(void)
     /* Handle the remote possibility that FD_ZERO() isn't all zero */
     FD_ZERO(&ptr->fdset);
 #endif
+
     return ptr;
 }
 
@@ -147,31 +164,54 @@ int pollset_next(const struct pollset *set, pollset_cursor *cursor, int *whatp)
 int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
 {
     size_t i;
+    int rv;
+
+
+    for (i = 0; i < set->nfds; i++)
+        set->fds[i].events = what;
+
+    if (pollset_intr)
+        goto intr;
+
+    if (sigsetjmp(pollset_sigjmpbuf, 1))
+        goto intr;
+
+    pollset_jmp = 1;
+    if (pollset_intr)
+        goto intr;
 
 #ifdef HAVE_PPOLL
-    struct timespec ts, *tsp = NULL;
-    if (utimeout >= 0) {
-        ts.tv_sec  =  utimeout / 1000000;
-        ts.tv_nsec = (utimeout % 1000000) * 1000;
-        tsp = &ts;
+    {
+        struct timespec ts, *tsp = NULL;
+
+        if (utimeout >= 0) {
+            ts.tv_sec  =  utimeout / 1000000;
+            ts.tv_nsec = (utimeout % 1000000) * 1000;
+            tsp = &ts;
+        }
+        rv = ppoll(set->fds, set->nfds, tsp, NULL);
     }
-
-    for (i = 0; i < set->nfds; i++)
-        set->fds[i].events = what;
-
-    return ppoll(set->fds, set->nfds, tsp, NULL);
 #else
-    int timeout = -1;
-    if (utimeout >= 0) {
-        utimeout = (utimeout + 999)/1000;
-        timeout = (utimeout > INT_MAX) ? INT_MAX : utimeout;
+    {
+        int timeout = -1;
+
+        if (utimeout >= 0) {
+            utimeout = (utimeout + 999)/1000;
+            timeout = (utimeout > INT_MAX) ? INT_MAX : utimeout;
+        }
+
+        rv = poll(set->fds, set->nfds, timeout);
     }
-
-    for (i = 0; i < set->nfds; i++)
-        set->fds[i].events = what;
-
-    return poll(set->fds, set->nfds, timeout);
 #endif
+
+    pollset_jmp = 0;
+    return rv;
+
+intr:
+    pollset_intr = 0;
+    pollset_jmp = 0;
+    errno = EINTR;
+    return -1;
 }
 
 int pollset_close(struct pollset **setp)
@@ -257,16 +297,10 @@ int pollset_next(const struct pollset *set, pollset_cursor *cursor, int *whatp)
 
 int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
 {
-    struct timeval tv, *tvp = NULL;
     fd_set *sets[3] = { NULL, NULL, NULL };
     size_t i;
     const size_t nsets = POLLSET_FDSETS < 3 ? POLLSET_FDSETS : 3;
-
-    if (utimeout >= 0) {
-        tv.tv_sec  = utimeout / 1000000;
-        tv.tv_usec = utimeout % 1000000;
-        tvp = &tv;
-    }
+    int rv;
 
     for (i = 0; i < nsets; i++) {
         if (what & (1 << i)) {
@@ -277,7 +311,36 @@ int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
         }
     }
 
-    return select(set->nfds, sets[0], sets[1], sets[2], tvp);
+    if (pollset_intr)
+        goto intr;
+
+    if (sigsetjmp(pollset_sigjmpbuf, 1))
+        goto intr;
+
+    pollset_jmp = 1;
+    if (pollset_intr)
+        goto intr;
+
+    {
+        struct timeval tv, *tvp = NULL;
+
+        if (utimeout >= 0) {
+            tv.tv_sec  = utimeout / 1000000;
+            tv.tv_usec = utimeout % 1000000;
+            tvp = &tv;
+        }
+
+        rv = select(set->nfds, sets[0], sets[1], sets[2], tvp);
+    }
+
+    pollset_jmp = 0;
+    return rv;
+
+intr:
+    pollset_intr = 0;
+    pollset_jmp = 0;
+    errno = EINTR;
+    return -1;
 }
 
 int pollset_close(struct pollset **setp)

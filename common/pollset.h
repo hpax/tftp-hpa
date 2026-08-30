@@ -61,9 +61,23 @@ int pollset_poll(struct pollset *set, int what, intmax_t utimeout);
 
 /*
  * pollset_close() is like pollset_free(), but closes file descriptors
- * in the set
+ * in the set.
  */
 int pollset_close(struct pollset **setp);
 void pollset_free(struct pollset **setp);
+
+/*
+ * Signals that should be masked around the poll, to avoid possibly lost
+ * EINTR.
+ */
+void pollset_sigmask_add(int sig);
+void pollset_sigmask_clear(void);
+
+/*
+ * pollset_notify_signal() should be called at the end of a signal
+ * handler to force the next pollset_poll() to return EINTR if set.
+ * It may or may not return.
+ */
+void pollset_notify_signal(int sig);
 
 #endif /* TFTP_POLLSET_H */

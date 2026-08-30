@@ -130,6 +130,8 @@ AC_CHECK_FUNCS(setregid)
 AC_CHECK_FUNCS(initgroups)
 AC_CHECK_FUNCS(setgroups)
 AC_CHECK_TYPES(sighandler_t)
+AC_CHECK_TYPES([sigset_t], [],
+  [AC_MSG_ERROR(sigset_t not found, please send a bug report)])
 
 dnl Solaris 8 has [u]intmax_t but not strtoumax().  How utterly braindamaged.
 AC_CHECK_FUNCS(strtoumax)
@@ -153,6 +155,8 @@ PA_SIGSETJMP
 PA_ARG_DISABLED([threads],
   [disable threading support: for debugging only], [],
   [PA_PTHREAD])
+
+AC_CHECK_FUNCS(pthread_sigmask)
 
 dnl
 dnl Get common paths
