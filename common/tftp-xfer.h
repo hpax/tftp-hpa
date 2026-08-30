@@ -9,6 +9,8 @@
 
 #include "tftpsubs.h"
 
+#define TFTP_XFER_MAX_PACKET_SIZE (MAX_SEGSIZE + 4)
+
 enum tftp_xfer_status {
     TFTP_XFER_OK,
     TFTP_XFER_SEND_ERROR,
@@ -24,6 +26,7 @@ struct tftp_xfer_result {
     int error;
     uintmax_t bytes;
     uint16_t last_block;
+    /* Caller-owned control or input packet storage. */
     const struct tftphdr *packet;
 };
 
@@ -48,7 +51,8 @@ struct tftp_xfer_ops {
  * the adapter can pipeline file I/O independently.  A read window remains
  * valid until read_release() and a write packet remains reserved until
  * write_publish().  All callbacks return -1 and set errno on failure,
- * except for callbacks declared void.
+ * except for callbacks declared void.  write_reserve() must provide room
+ * for a TFTP header and xfer->blocksize bytes of data.
  */
 struct tftp_xfer_io_ops {
     int (*read_window)(void *, unsigned int *, int *);
@@ -80,11 +84,15 @@ void tftp_xfer_send(const struct tftp_xfer *, struct tftp_xfer_result *);
 
 /*
  * Receive a file after any request or OACK exchange is complete.  ack is
- * the reusable ACK buffer.  initial_reply, when supplied, is sent before
- * waiting for DATA 1 (typically OACK or ACK 0).  initial_packet is DATA 1
- * that the request exchange has already received.
+ * the reusable ACK buffer.  input is caller-owned storage, separate from the
+ * I/O adapter, with a capacity of at least TFTP_XFER_MAX_PACKET_SIZE;
+ * received data is validated and copied to the adapter's reserved storage.
+ * input must remain valid through any use of result.packet.  initial_reply,
+ * when supplied, is sent before waiting for DATA 1 (typically OACK or ACK 0).
+ * initial_packet is DATA 1 that the request exchange has already received.
  */
 void tftp_xfer_recv(const struct tftp_xfer *, struct tftphdr *ack,
+                    struct tftphdr *input, int input_size,
                     const struct tftphdr *initial_reply,
                     int initial_reply_len, struct tftphdr *initial_packet,
                     int initial_packet_len, struct tftp_xfer_result *);

@@ -413,7 +413,7 @@ static void tftp_io_read_release(void *vctx)
 #endif
 }
 
-struct tftphdr *tftp_io_writer_reserve(struct tftp_io *io)
+static struct tftphdr *tftp_io_writer_reserve(struct tftp_io *io)
 {
     struct tftphdr *dp;
 
@@ -443,22 +443,6 @@ struct tftphdr *tftp_io_writer_reserve(struct tftp_io *io)
         pthread_mutex_unlock(&io->lock);
 #endif
     return dp;
-}
-
-void tftp_io_writer_discard(struct tftp_io *io)
-{
-#ifdef HAVE_PTHREAD
-    if (io->threaded)
-        pthread_mutex_lock(&io->lock);
-#endif
-    if (io->states[io->tail] == SLOT_RESERVED)
-        io->states[io->tail] = SLOT_EMPTY;
-#ifdef HAVE_PTHREAD
-    if (io->threaded) {
-        pthread_cond_broadcast(&io->changed);
-        pthread_mutex_unlock(&io->lock);
-    }
-#endif
 }
 
 static int tftp_io_write_publish(void *vctx, int length)

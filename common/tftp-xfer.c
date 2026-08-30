@@ -151,12 +151,14 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
 }
 
 void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
+                    struct tftphdr *input, int input_size,
                     const struct tftphdr *initial_reply,
                     int initial_reply_len, struct tftphdr *initial_packet,
                     int initial_packet_len, struct tftp_xfer_result *result)
 {
     struct tftphdr * volatile dp;
     const struct tftphdr *reply;
+    const struct tftphdr *packet;
     sigjmp_buf retrybuf;
     volatile uint16_t block = 1;
     volatile uint16_t last_acked = 0;
@@ -179,16 +181,17 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
         return;
     }
-    if (initial_packet_pending) {
-        dp = initial_packet;
-    } else {
-        dp = xfer->io_ops->write_reserve(xfer->io_context);
-        if (!dp) {
-            if (!errno)
-                errno = EIO;
-            finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
-            return;
-        }
+    if (!input || input_size < TFTP_XFER_MAX_PACKET_SIZE) {
+        errno = EINVAL;
+        finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
+        return;
+    }
+    dp = xfer->io_ops->write_reserve(xfer->io_context);
+    if (!dp) {
+        if (!errno)
+            errno = EIO;
+        finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
+        return;
     }
 
     for (;;) {
@@ -214,13 +217,14 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         if (initial_packet_pending) {
             n = initial_packet_len;
             initial_packet_pending = 0;
-            opcode = ntohs(dp->th_opcode);
-            packet_block = ntohs(dp->th_block);
+            packet = initial_packet;
+            opcode = ntohs(packet->th_opcode);
+            packet_block = ntohs(packet->th_block);
         } else {
             xfer->ops->wait_begin(xfer->context);
             for (;;) {
-                n = xfer->ops->recv(xfer->context, dp,
-                                    MAX_SEGSIZE + 4);
+                n = xfer->ops->recv(xfer->context, input,
+                                    TFTP_XFER_MAX_PACKET_SIZE);
                 if (n < 0) {
                     finish(xfer, result, TFTP_XFER_RECV_ERROR, errno,
                            bytes);
@@ -228,11 +232,12 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                 }
                 if (n < 4)
                     continue;
-                xfer->ops->received(xfer->context, dp, n);
-                opcode = ntohs(dp->th_opcode);
-                packet_block = ntohs(dp->th_block);
+                xfer->ops->received(xfer->context, input, n);
+                packet = input;
+                opcode = ntohs(input->th_opcode);
+                packet_block = ntohs(input->th_block);
                 if (opcode == ERROR) {
-                    result->packet = dp;
+                    result->packet = input;
                     finish(xfer, result, TFTP_XFER_PEER_ERROR, 0,
                            bytes);
                     return;
@@ -255,6 +260,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             return;
         }
         size = n - 4;
+        memcpy(dp, packet, (size_t)n);
         if (xfer->io_ops->write_publish(xfer->io_context, size) < 0) {
             if (!errno)
                 errno = EIO;

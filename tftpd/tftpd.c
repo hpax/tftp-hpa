@@ -1891,8 +1891,8 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = io;
     xfer.io_ops = &tftp_io_xfer_ops;
-    tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len, NULL, 0,
-                   &result);
+    tftp_xfer_recv(&xfer, ap, ap, sizeof(ackbuf), initial_reply,
+                   initial_reply_len, NULL, 0, &result);
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
