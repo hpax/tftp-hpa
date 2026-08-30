@@ -15,9 +15,7 @@ OBJS  = tftpd.$(O) recvfrom.$(O) misc.$(O) path.$(O) listen.$(O) \
 all: tftpd$(X) tftpd.8
 
 tftpd$(X): $(OBJS) $(filter %.a,$(TFTPD_LIBS))
-	$(CC) $(CFLAGS) $(PTHREAD_CFLAGS) $(LDFLAGS) -o tftpd$(X) $(OBJS) $(TFTPD_LIBS) $(PTHREAD_LIBS)
-
-tftpio.$(O): CFLAGS += $(PTHREAD_CFLAGS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o tftpd$(X) $(OBJS) $(TFTPD_LIBS)
 
 tftpd.8: tftpd.8.in ../version
 	sed -e 's/@@VERSION@@/$(VERSION)/g' < tftpd.8.in > tftpd.8
