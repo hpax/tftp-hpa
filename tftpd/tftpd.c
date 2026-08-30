@@ -1894,6 +1894,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         xfer.control_size = sizeof(ackbuf);
         xfer.context = &context;
         xfer.ops = &daemon_xfer_ops;
+        xfer.io_context = NULL;
+        xfer.io_ops = NULL;
         tftp_xfer_send(&xfer, &result);
 
         switch (result.status) {
@@ -1953,6 +1955,8 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
+    xfer.io_context = NULL;
+    xfer.io_ops = NULL;
     tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len, NULL, 0,
                    &result);
 

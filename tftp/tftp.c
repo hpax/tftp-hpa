@@ -225,6 +225,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
+    xfer.io_context = NULL;
+    xfer.io_ops = NULL;
     tftp_xfer_send(&xfer, &result);
     amount = result.bytes;
 
@@ -357,6 +359,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
+    xfer.io_context = NULL;
+    xfer.io_ops = NULL;
     tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len,
                    initial_packet_len < 0 ? NULL : dp, initial_packet_len,
                    &result);
