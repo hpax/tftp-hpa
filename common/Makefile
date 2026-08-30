@@ -9,8 +9,8 @@ VERSION = $(shell cat ../version)
 -include ../config/MCONFIG
 include ../MRULES
 
-OBJS = tftpsubs.$(O) tftp-xfer.$(O) signal.$(O) xalloc.$(O) progname.$(O) \
-	pollset.$(O)
+OBJS = tftpsubs.$(O) tftp-xfer.$(O) tftp-io.$(O) signal.$(O) xalloc.$(O) \
+	progname.$(O) pollset.$(O)
 LIB  = libcommon.a
 
 all: $(LIB)
@@ -22,6 +22,7 @@ $(LIB): $(OBJS)
 
 $(OBJS): tftpsubs.h
 tftp-xfer.$(O): tftp-xfer.h
+tftp-io.$(O): tftp-io.h tftp-xfer.h
 
 install:
 
