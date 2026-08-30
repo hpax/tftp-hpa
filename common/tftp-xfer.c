@@ -216,7 +216,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     volatile uint16_t packet_block;
     volatile uintmax_t bytes = 0;
     volatile int packets_in_window = 0;
-    int initial_reply_pending = initial_reply != NULL;
+    volatile int initial_reply_pending = initial_reply != NULL;
     volatile int initial_packet_pending = initial_packet != NULL;
     int reply_len;
     int n;
