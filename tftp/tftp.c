@@ -6,6 +6,7 @@
  */
 
 #include "common/tftpsubs.h"
+#include "common/tftp-io.h"
 #include "common/tftp-xfer.h"
 
 /*
@@ -48,9 +49,7 @@ static void timer(int);
 static void tpacket(const char *, const struct tftphdr *, int);
 
 struct client_xfer_context {
-    FILE *file;
     union sock_addr from;
-    int convert;
 };
 
 static int client_xfer_send(void *vctx, const void *packet, int length)
@@ -112,9 +111,7 @@ static void client_xfer_wait_begin(void *vctx)
 
 static void client_xfer_flush(void *vctx)
 {
-    struct client_xfer_context *ctx = vctx;
-
-    (void)write_behind(ctx->file, ctx->convert);
+    (void)vctx;
 }
 
 static const struct tftp_xfer_ops client_xfer_ops = {
@@ -140,6 +137,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     union sock_addr from;
     socklen_t fromlen;
     FILE *file = NULL;
+    struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
@@ -213,8 +211,12 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         }
     }
 
-    context.file = file;
-    context.convert = convert;
+    io = tftp_io_reader_start(file, convert, window, window, segsize, 0);
+    if (!io) {
+        nak(errno + 100, NULL);
+        goto abort;
+    }
+
     xfer.file = file;
     xfer.convert = convert;
     xfer.blocksize = segsize;
@@ -225,10 +227,12 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
-    xfer.io_context = NULL;
-    xfer.io_ops = NULL;
+    xfer.io_context = io;
+    xfer.io_ops = &tftp_io_xfer_ops;
     tftp_xfer_send(&xfer, &result);
     amount = result.bytes;
+    tftp_io_stop(io);
+    io = NULL;
 
     switch (result.status) {
     case TFTP_XFER_READ_ERROR:
@@ -249,6 +253,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         break;
     }
   abort:
+    tftp_io_stop(io);
     if (file)
         fclose(file);
     stopclock();
@@ -266,6 +271,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     union sock_addr from;
     socklen_t fromlen;
     FILE *file = NULL;
+    struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
@@ -284,7 +290,18 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     file = fdopen(fd, convert ? "wt" : "wb");
     if (!file)
         goto abort;
-    dp = w_init();
+    io = tftp_io_writer_start(file, convert,
+                              requested_window ? requested_window : 1,
+                              blocksize, 0);
+    if (!io) {
+        nak(errno + 100, NULL);
+        goto abort;
+    }
+    dp = tftp_io_writer_reserve(io);
+    if (!dp) {
+        nak(errno + 100, NULL);
+        goto abort;
+    }
     ap = (struct tftphdr *)ackbuf;
     size = makerequest(RRQ, name, ap, mode, blocksize, requested_window,
                        sizeof(ackbuf));
@@ -336,6 +353,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             ap->th_block = 0;
             initial_reply = ap;
             initial_reply_len = 4;
+            tftp_io_writer_discard(io);
         } else if (opcode == DATA && n >= 4 && ntohs(dp->th_block) == 1) {
             segsize = SEGSIZE;
             window = 1;         /* Peer ignored requested options. */
@@ -347,8 +365,6 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         break;
     }
 
-    context.file = file;
-    context.convert = convert;
     xfer.file = file;
     xfer.convert = convert;
     xfer.blocksize = segsize;
@@ -359,12 +375,14 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
-    xfer.io_context = NULL;
-    xfer.io_ops = NULL;
+    xfer.io_context = io;
+    xfer.io_ops = &tftp_io_xfer_ops;
     tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len,
                    initial_packet_len < 0 ? NULL : dp, initial_packet_len,
                    &result);
     amount = result.bytes;
+    tftp_io_stop(io);
+    io = NULL;
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
@@ -391,8 +409,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     }
 
   abort:
+    tftp_io_stop(io);
     if (file) {
-        write_behind(file, convert);
         fclose(file);
     }
     stopclock();
