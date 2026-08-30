@@ -124,6 +124,7 @@ static inline int tftp_sigmask(int how, const sigset_t *set, sigset_t *oset)
     do {
         rv = sigprocmask(how, set, oset) ? errno : 0;
     } while (rv == EINTR);
+    return rv;
 #endif
 }
 
