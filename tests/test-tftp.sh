@@ -173,6 +173,12 @@ test_download() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
 
+    local mode
+    case "$filename" in
+	*.txt) mode=netascii ;;
+	*)     mode=octet ;;
+    esac
+
     print_info "Testing download: $filename"
 
     # Copy file to server directory
@@ -183,7 +189,8 @@ test_download() {
     local download_file="$TEST_DIR/${filename}.downloaded"
 
     # Use non-interactive tftp with get command
-    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
+    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" $mode
+		       "$LOCALHOST" "$PORT"
 		       -c get "$server_file" "$download_file")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
@@ -211,13 +218,20 @@ test_upload() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
 
+    local mode
+    case "$filename" in
+	*.txt) mode=netascii ;;
+	*)     mode=octet ;;
+    esac
+
     print_info "Testing upload: $filename"
 
     local server_file="$SERVER_DIR/$filename"
 
     # Use tftp to upload the file
     # The server will write it to SERVER_DIR
-    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "$LOCALHOST" "$PORT"
+    local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" "$mode"
+		       "$LOCALHOST" "$PORT"
 		       -c put "$TEST_DIR/$filename" "$server_file")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
