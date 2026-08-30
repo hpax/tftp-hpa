@@ -109,11 +109,6 @@ static void client_xfer_wait_begin(void *vctx)
     (void)vctx;
 }
 
-static void client_xfer_flush(void *vctx)
-{
-    (void)vctx;
-}
-
 static const struct tftp_xfer_ops client_xfer_ops = {
     client_xfer_send,
     client_xfer_recv,
@@ -121,8 +116,7 @@ static const struct tftp_xfer_ops client_xfer_ops = {
     client_xfer_drain,
     client_xfer_retry_enter,
     client_xfer_retry_leave,
-    client_xfer_wait_begin,
-    client_xfer_flush
+    client_xfer_wait_begin
 };
 
 /*
@@ -217,8 +211,6 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         goto abort;
     }
 
-    xfer.file = file;
-    xfer.convert = convert;
     xfer.blocksize = segsize;
     xfer.windowsize = window;
     xfer.rollover = 0;
@@ -365,8 +357,6 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         break;
     }
 
-    xfer.file = file;
-    xfer.convert = convert;
     xfer.blocksize = segsize;
     xfer.windowsize = window;
     xfer.rollover = 0;
@@ -389,8 +379,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         nak(EBADOP, "Data packet too large");
         break;
     case TFTP_XFER_WRITE_ERROR:
-        if (result.io_result < 0)
-            nak(result.error + 100, NULL);
+        nak(result.error + 100, NULL);
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;

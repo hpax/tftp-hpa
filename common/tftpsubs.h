@@ -5,10 +5,6 @@
  *	The Regents of the University of California.  All rights reserved.
  */
 
-/*
- * Prototypes for read-ahead/write-behind subroutines for tftp user and
- * server.
- */
 #ifndef TFTPSUBS_H
 #define TFTPSUBS_H
 
@@ -97,15 +93,7 @@ static inline int setsockint(int sockfd, int level, int optname,
 
 struct tftphdr;
 
-struct tftphdr *r_init(void);
-void read_ahead(FILE *, int);
-int readit(FILE *, struct tftphdr **, int);
-
 int synchnet(int);
-
-struct tftphdr *w_init(void);
-int write_behind(FILE *, int);
-int writeit(FILE *, struct tftphdr **, int, int);
 
 extern int segsize;
 #define MAX_SEGSIZE	65464

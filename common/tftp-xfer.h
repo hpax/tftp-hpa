@@ -21,7 +21,6 @@ enum tftp_xfer_status {
 
 struct tftp_xfer_result {
     enum tftp_xfer_status status;
-    int io_result;
     int error;
     uintmax_t bytes;
     uint16_t last_block;
@@ -42,15 +41,14 @@ struct tftp_xfer_ops {
     void (*retry_enter)(void *, sigjmp_buf *, int);
     void (*retry_leave)(void *);
     void (*wait_begin)(void *);
-    void (*flush)(void *);
 };
 
 /*
- * An optional file I/O adapter.  The transfer engine owns the protocol
- * state, while an adapter can pipeline file I/O independently.  A read
- * window remains valid until read_release() and a write packet remains
- * reserved until write_publish().  All callbacks return -1 and set errno
- * on failure, except for callbacks declared void.
+ * The file I/O adapter.  The transfer engine owns the protocol state, while
+ * the adapter can pipeline file I/O independently.  A read window remains
+ * valid until read_release() and a write packet remains reserved until
+ * write_publish().  All callbacks return -1 and set errno on failure,
+ * except for callbacks declared void.
  */
 struct tftp_xfer_io_ops {
     int (*read_window)(void *, unsigned int *, int *);
@@ -63,8 +61,6 @@ struct tftp_xfer_io_ops {
 };
 
 struct tftp_xfer {
-    FILE *file;
-    int convert;
     unsigned int blocksize;
     unsigned int windowsize;
     uint16_t rollover;

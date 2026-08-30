@@ -534,8 +534,18 @@ static int tftp_io_write_drain(void *vctx)
         }
         error = io->error;
     }
-    if (!error && fflush(io->file))
+    if (!error && fflush(io->file)) {
         error = errno ? errno : EIO;
+#ifdef HAVE_PTHREAD
+    if (io->threaded)
+        pthread_mutex_lock(&io->lock);
+#endif
+    io_error(io, error);
+#ifdef HAVE_PTHREAD
+    if (io->threaded)
+        pthread_mutex_unlock(&io->lock);
+#endif
+    }
     if (error)
         errno = error;
     return error ? -1 : 0;

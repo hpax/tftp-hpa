@@ -25,13 +25,11 @@
 #include <syslog.h>
 
 #include "common/tftpsubs.h"
+#include "common/tftp-io.h"
 #include "common/tftp-xfer.h"
 #include "common/pollset.h"
 #include "recvfrom.h"
 #include "remap.h"
-#ifdef HAVE_PTHREAD
-#include "tftpio.h"
-#endif
 
 #ifdef HAVE_SYS_FILIO_H
 #include <sys/filio.h>          /* Necessary for FIONBIO on Solaris */
@@ -109,9 +107,8 @@ static void nak(int, const char *);
 static void timer(int);
 static void do_opt(const char *, const char *, char **);
 static void negotiate_windowsize(char **);
-#ifdef HAVE_PTHREAD
 static unsigned int io_ring_slots(void);
-#endif
+static int io_is_threaded(void);
 
 static int set_blksize(uintmax_t *);
 static int set_blksize2(uintmax_t *);
@@ -311,8 +308,6 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
 
 struct daemon_xfer_context {
     unsigned long timeout;
-    int convert;
-    int buffered;
 };
 
 static int daemon_xfer_send(void *vctx, const void *packet, int length)
@@ -364,14 +359,6 @@ static void daemon_xfer_wait_begin(void *vctx)
     ctx->timeout = timeout;
 }
 
-static void daemon_xfer_flush(void *vctx)
-{
-    struct daemon_xfer_context *ctx = vctx;
-
-    if (ctx->buffered)
-        (void)write_behind(file, ctx->convert);
-}
-
 static void daemon_xfer_dally(uint16_t last_acked)
 {
     int n;
@@ -393,8 +380,7 @@ static const struct tftp_xfer_ops daemon_xfer_ops = {
     daemon_xfer_drain,
     daemon_xfer_retry_enter,
     daemon_xfer_retry_leave,
-    daemon_xfer_wait_begin,
-    daemon_xfer_flush
+    daemon_xfer_wait_begin
 };
 
 static void tftpd_out_of_memory(void)
@@ -1368,7 +1354,6 @@ static void negotiate_windowsize(char **ap)
     *ap += retlen + 1;
 }
 
-#ifdef HAVE_PTHREAD
 /*
  * Keep at least one full window for retransmission, then for
  * asynchronous I/O allow for the largest of:
@@ -1378,6 +1363,7 @@ static void negotiate_windowsize(char **ap)
  */
 static unsigned int io_ring_slots(void)
 {
+#ifdef HAVE_PTHREAD
     unsigned int io_slots;
 
     io_slots = (segsize + IO_RING_MIN_BYTES - 1) / segsize;
@@ -1387,8 +1373,19 @@ static unsigned int io_ring_slots(void)
         io_slots = 2;
 
     return windowsize + io_slots;
-}
+#else
+    return windowsize;
 #endif
+}
+
+static int io_is_threaded(void)
+{
+#ifdef HAVE_PTHREAD
+    return 1;
+#else
+    return 0;
+#endif
+}
 
 /*
  * Return a file size (c.f. RFC2349)
@@ -1774,9 +1771,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
-#ifdef HAVE_PTHREAD
-    static struct tftpio *io;
-#endif
+    struct tftp_io * volatile io = NULL;
 
     if (oap) {
         timeout = rexmtval;
@@ -1812,19 +1807,13 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         }
     }
 
-#ifdef HAVE_PTHREAD
-    io = tftpio_reader_start(file, pf->f_convert, windowsize,
-                             io_ring_slots(), segsize);
+    io = tftp_io_reader_start(file, pf->f_convert, windowsize,
+                              io_ring_slots(), segsize, io_is_threaded());
     if (!io) {
         nak(-errno, NULL);
         goto out;
     }
-#endif
 
-    context.convert = pf->f_convert;
-    context.buffered = 0;
-    xfer.file = file;
-    xfer.convert = pf->f_convert;
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
@@ -1833,14 +1822,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
-    xfer.io_context = NULL;
-    xfer.io_ops = NULL;
-#ifdef HAVE_PTHREAD
     xfer.io_context = io;
-    xfer.io_ops = &tftpio_xfer_io_ops;
-#else
-    context.buffered = 1;
-#endif
+    xfer.io_ops = &tftp_io_xfer_ops;
     tftp_xfer_send(&xfer, &result);
 
     switch (result.status) {
@@ -1860,10 +1843,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     }
 
   out:
-#ifdef HAVE_PTHREAD
-    tftpio_stop(io);
+    tftp_io_stop(io);
     io = NULL;
-#endif
     (void)fclose(file);
     file = NULL;
 }
@@ -1880,9 +1861,7 @@ static void tftp_recvfile(const struct formats *pf,
     struct tftphdr *ap;
     const struct tftphdr *initial_reply;
     int initial_reply_len;
-#ifdef HAVE_PTHREAD
-    struct tftpio *io = NULL;
-#endif
+    struct tftp_io * volatile io = NULL;
 
     ap = (struct tftphdr *)ackbuf;
     if (oack) {
@@ -1895,18 +1874,13 @@ static void tftp_recvfile(const struct formats *pf,
         initial_reply_len = 4;
     }
 
-#ifdef HAVE_PTHREAD
-    io = tftpio_writer_start(file, pf->f_convert, io_ring_slots(), segsize);
+    io = tftp_io_writer_start(file, pf->f_convert, io_ring_slots(), segsize,
+                              io_is_threaded());
     if (!io) {
         nak(-errno, NULL);
         goto out;
     }
-#endif
 
-    context.convert = pf->f_convert;
-    context.buffered = 0;
-    xfer.file = file;
-    xfer.convert = pf->f_convert;
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
@@ -1915,14 +1889,8 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
-    xfer.io_context = NULL;
-    xfer.io_ops = NULL;
-#ifdef HAVE_PTHREAD
     xfer.io_context = io;
-    xfer.io_ops = &tftpio_xfer_io_ops;
-#else
-    context.buffered = 1;
-#endif
+    xfer.io_ops = &tftp_io_xfer_ops;
     tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len, NULL, 0,
                    &result);
 
@@ -1931,14 +1899,7 @@ static void tftp_recvfile(const struct formats *pf,
         nak(EBADOP, "Data packet too large");
         break;
     case TFTP_XFER_WRITE_ERROR:
-#ifdef HAVE_PTHREAD
         nak(-result.error, NULL);
-#else
-        if (result.io_result < 0)
-            nak(-result.error, NULL);
-        else
-            nak(ENOSPACE, NULL);
-#endif
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
@@ -1952,23 +1913,16 @@ static void tftp_recvfile(const struct formats *pf,
         break;
     }
 
-#ifdef HAVE_PTHREAD
-    tftpio_stop(io);
+    tftp_io_stop(io);
     io = NULL;
-#endif
     if (result.status != TFTP_XFER_OK)
         goto out;
 
-#ifndef HAVE_PTHREAD
-    (void)write_behind(file, pf->f_convert);
-#endif
     (void)fclose(file);
     file = NULL;
     daemon_xfer_dally(result.last_block);
   out:
-#ifdef HAVE_PTHREAD
-    tftpio_stop(io);
-#endif
+    tftp_io_stop(io);
     if (file) {
         (void)fclose(file);
         file = NULL;
