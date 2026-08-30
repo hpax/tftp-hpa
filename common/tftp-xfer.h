@@ -87,9 +87,10 @@ void tftp_xfer_send(const struct tftp_xfer *, struct tftp_xfer_result *);
  * the reusable ACK buffer.  input is caller-owned storage, separate from the
  * I/O adapter, with a capacity of at least TFTP_XFER_MAX_PACKET_SIZE;
  * received data is validated and copied to the adapter's reserved storage.
- * input must remain valid through any use of result.packet.  initial_reply,
- * when supplied, is sent before waiting for DATA 1 (typically OACK or ACK 0).
- * initial_packet is DATA 1 that the request exchange has already received.
+ * input must not overlap initial_reply and must remain valid through any use
+ * of result.packet.  initial_reply, when supplied, is sent before waiting
+ * for DATA 1 (typically OACK or ACK 0).  initial_packet is DATA 1 that the
+ * request exchange has already received.
  */
 void tftp_xfer_recv(const struct tftp_xfer *, struct tftphdr *ack,
                     struct tftphdr *input, int input_size,

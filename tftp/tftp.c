@@ -365,7 +365,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     xfer.ops = &client_xfer_ops;
     xfer.io_context = io;
     xfer.io_ops = &tftp_io_xfer_ops;
-    tftp_xfer_recv(&xfer, ap, ap, sizeof(ackbuf),
+    tftp_xfer_recv(&xfer, ap, initial_packet,
+                   TFTP_XFER_MAX_PACKET_SIZE,
                    initial_reply, initial_reply_len,
                    initial_packet_len < 0 ? NULL : initial_packet,
                    initial_packet_len,
@@ -373,8 +374,6 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     amount = result.bytes;
     tftp_io_stop(io);
     io = NULL;
-    xfree(initial_packet);
-    initial_packet = NULL;
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
@@ -399,6 +398,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         break;
     }
 
+    xfree(initial_packet);
+    initial_packet = NULL;
   abort:
     tftp_io_stop(io);
     xfree(initial_packet);
