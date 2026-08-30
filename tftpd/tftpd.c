@@ -309,10 +309,10 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
     return rv;
 }
 
-#ifndef HAVE_PTHREAD
 struct daemon_xfer_context {
     unsigned long timeout;
     int convert;
+    int buffered;
 };
 
 static int daemon_xfer_send(void *vctx, const void *packet, int length)
@@ -368,7 +368,8 @@ static void daemon_xfer_flush(void *vctx)
 {
     struct daemon_xfer_context *ctx = vctx;
 
-    (void)write_behind(file, ctx->convert);
+    if (ctx->buffered)
+        (void)write_behind(file, ctx->convert);
 }
 
 static void daemon_xfer_dally(uint16_t last_acked)
@@ -395,7 +396,6 @@ static const struct tftp_xfer_ops daemon_xfer_ops = {
     daemon_xfer_wait_begin,
     daemon_xfer_flush
 };
-#endif /* HAVE_PTHREAD */
 
 static void tftpd_out_of_memory(void)
 {
@@ -1771,9 +1771,10 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     int n;
+    struct daemon_xfer_context context;
+    struct tftp_xfer xfer;
+    struct tftp_xfer_result result;
 #ifdef HAVE_PTHREAD
-    struct tftphdr *dp;
-    static uint16_t block = 1;   /* Static to avoid longjmp funnies */
     static struct tftpio *io;
 #endif
 
@@ -1784,13 +1785,13 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         r_timeout = timeout;
         if (send(peer, oap, oacklen, 0) != oacklen) {
             tftpd_log(LOG_WARNING, "tftpd: oack: %m\n");
-            goto abort;
+            goto out;
         }
         for (;;) {
             n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
             if (n < 0) {
                 tftpd_log(LOG_WARNING, "tftpd: read: %m\n");
-                goto abort;
+                goto out;
             }
             ap = (struct tftphdr *)ackbuf;
             ap_opcode = ntohs((uint16_t) ap->th_opcode);
@@ -1799,7 +1800,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
             if (ap_opcode == ERROR) {
                 tftpd_log(LOG_WARNING,
                        "tftp: client does not accept options\n");
-                goto abort;
+                goto out;
             }
             if (ap_opcode == ACK) {
                 if (ap_block == 0)
@@ -1812,111 +1813,59 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     }
 
 #ifdef HAVE_PTHREAD
-    {
-        static unsigned int packet_count;
-        static int final;
-        uint16_t expected_ack;
-
-        io = tftpio_reader_start(file, pf->f_convert, windowsize,
-                                 io_ring_slots(), segsize);
-        if (!io) {
-            nak(-errno, NULL);
-            goto abort;
-        }
-        for (;;) {
-            if (tftpio_reader_window(io, &packet_count, &final) < 0) {
-                nak(-errno, NULL);
-                goto abort;
-            }
-            for (n = 0; n < (int)packet_count; n++) {
-                dp = tftpio_reader_packet(io, (unsigned int)n);
-                dp->th_opcode = htons((uint16_t) DATA);
-                dp->th_block = htons((uint16_t)block);
-                if (!++block)
-                    block = rollover_val;
-            }
-
-            timeout = rexmtval;
-            (void)sigsetjmp(timeoutbuf, 1);
-          resend_window:
-            for (n = 0; n < (int)packet_count; n++) {
-                dp = tftpio_reader_packet(io, (unsigned int)n);
-                if (send(peer, dp, tftpio_reader_length(io, (unsigned int)n),
-                         0) != tftpio_reader_length(io, (unsigned int)n)) {
-                    tftpd_log(LOG_WARNING, "tftpd: write: %m");
-                    goto abort;
-                }
-            }
-            r_timeout = timeout;
-            for (;;) {
-                n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
-                if (n < 0) {
-                    tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
-                    goto abort;
-                }
-                ap = (struct tftphdr *)ackbuf;
-                ap_opcode = ntohs((uint16_t)ap->th_opcode);
-                ap_block = ntohs((uint16_t)ap->th_block);
-                if (ap_opcode == ERROR)
-                    goto abort;
-                expected_ack = ntohs(tftpio_reader_packet(io, packet_count - 1)
-                                     ->th_block);
-                if (ap_opcode == ACK && ap_block == expected_ack)
-                    break;
-                if (ap_opcode == ACK)
-                    (void)synchnet(peer);
-                else if (ap_opcode == OACK)
-                    goto resend_window;
-            }
-            tftpio_reader_release(io);
-            if (final)
-                break;
-        }
+    io = tftpio_reader_start(file, pf->f_convert, windowsize,
+                             io_ring_slots(), segsize);
+    if (!io) {
+        nak(-errno, NULL);
+        goto out;
     }
-  abort:
+#endif
+
+    context.convert = pf->f_convert;
+    context.buffered = 0;
+    xfer.file = file;
+    xfer.convert = pf->f_convert;
+    xfer.blocksize = segsize;
+    xfer.windowsize = windowsize;
+    xfer.rollover = rollover_val;
+    xfer.resend_oack = 1;
+    xfer.control = ackbuf;
+    xfer.control_size = sizeof(ackbuf);
+    xfer.context = &context;
+    xfer.ops = &daemon_xfer_ops;
+    xfer.io_context = NULL;
+    xfer.io_ops = NULL;
+#ifdef HAVE_PTHREAD
+    xfer.io_context = io;
+    xfer.io_ops = &tftpio_xfer_io_ops;
+#else
+    context.buffered = 1;
+#endif
+    tftp_xfer_send(&xfer, &result);
+
+    switch (result.status) {
+    case TFTP_XFER_READ_ERROR:
+        nak(-result.error, NULL);
+        break;
+    case TFTP_XFER_SEND_ERROR:
+        errno = result.error;
+        tftpd_log(LOG_WARNING, "tftpd: write: %m");
+        break;
+    case TFTP_XFER_RECV_ERROR:
+        errno = result.error;
+        tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
+        break;
+    default:
+        break;
+    }
+
+  out:
+#ifdef HAVE_PTHREAD
     tftpio_stop(io);
     io = NULL;
-    (void)fclose(file);
-#else
-    {
-        struct daemon_xfer_context context;
-        struct tftp_xfer xfer;
-        struct tftp_xfer_result result;
-
-        context.convert = pf->f_convert;
-        xfer.file = file;
-        xfer.convert = pf->f_convert;
-        xfer.blocksize = segsize;
-        xfer.windowsize = windowsize;
-        xfer.rollover = rollover_val;
-        xfer.resend_oack = 1;
-        xfer.control = ackbuf;
-        xfer.control_size = sizeof(ackbuf);
-        xfer.context = &context;
-        xfer.ops = &daemon_xfer_ops;
-        xfer.io_context = NULL;
-        xfer.io_ops = NULL;
-        tftp_xfer_send(&xfer, &result);
-
-        switch (result.status) {
-        case TFTP_XFER_READ_ERROR:
-            nak(-result.error, NULL);
-            break;
-        case TFTP_XFER_SEND_ERROR:
-            errno = result.error;
-            tftpd_log(LOG_WARNING, "tftpd: write: %m");
-            break;
-        case TFTP_XFER_RECV_ERROR:
-            errno = result.error;
-            tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
-            break;
-        default:
-            break;
-        }
-    }
-  abort:
-    (void)fclose(file);
 #endif
+    (void)fclose(file);
+    file = NULL;
 }
 
 /*
@@ -1925,13 +1874,15 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
 static void tftp_recvfile(const struct formats *pf,
 			  struct tftphdr *oack, int oacklen)
 {
-#ifndef HAVE_PTHREAD
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
     struct tftphdr *ap;
     const struct tftphdr *initial_reply;
     int initial_reply_len;
+#ifdef HAVE_PTHREAD
+    struct tftpio *io = NULL;
+#endif
 
     ap = (struct tftphdr *)ackbuf;
     if (oack) {
@@ -1944,7 +1895,16 @@ static void tftp_recvfile(const struct formats *pf,
         initial_reply_len = 4;
     }
 
+#ifdef HAVE_PTHREAD
+    io = tftpio_writer_start(file, pf->f_convert, io_ring_slots(), segsize);
+    if (!io) {
+        nak(-errno, NULL);
+        goto out;
+    }
+#endif
+
     context.convert = pf->f_convert;
+    context.buffered = 0;
     xfer.file = file;
     xfer.convert = pf->f_convert;
     xfer.blocksize = segsize;
@@ -1957,6 +1917,12 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = NULL;
     xfer.io_ops = NULL;
+#ifdef HAVE_PTHREAD
+    xfer.io_context = io;
+    xfer.io_ops = &tftpio_xfer_io_ops;
+#else
+    context.buffered = 1;
+#endif
     tftp_xfer_recv(&xfer, ap, initial_reply, initial_reply_len, NULL, 0,
                    &result);
 
@@ -1965,10 +1931,14 @@ static void tftp_recvfile(const struct formats *pf,
         nak(EBADOP, "Data packet too large");
         break;
     case TFTP_XFER_WRITE_ERROR:
+#ifdef HAVE_PTHREAD
+        nak(-result.error, NULL);
+#else
         if (result.io_result < 0)
             nak(-result.error, NULL);
         else
             nak(ENOSPACE, NULL);
+#endif
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
@@ -1982,147 +1952,28 @@ static void tftp_recvfile(const struct formats *pf,
         break;
     }
 
+#ifdef HAVE_PTHREAD
+    tftpio_stop(io);
+    io = NULL;
+#endif
     if (result.status != TFTP_XFER_OK)
-        goto abort_unthreaded;
+        goto out;
 
+#ifndef HAVE_PTHREAD
     (void)write_behind(file, pf->f_convert);
+#endif
     (void)fclose(file);
     file = NULL;
     daemon_xfer_dally(result.last_block);
-  abort_unthreaded:
+  out:
+#ifdef HAVE_PTHREAD
+    tftpio_stop(io);
+#endif
     if (file) {
         (void)fclose(file);
         file = NULL;
     }
     return;
-#else
-    static struct tftphdr *dp;
-    static struct tftpio *io;
-    int n, size, restarted, final;
-    /* These are "static" to avoid longjmp funnies */
-    static struct tftphdr *oap;
-    static struct tftphdr *ap;  /* ack buffer */
-    static uint16_t block;
-    static uint16_t last_acked;
-    static int acksize;
-    static unsigned int packets_in_window;
-    uint16_t dp_opcode, dp_block;
-    unsigned long r_timeout;
-
-    oap = oack;
-    io = tftpio_writer_start(file, pf->f_convert, io_ring_slots(), segsize);
-    if (!io) {
-        nak(-errno, NULL);
-        goto abort;
-    }
-    dp = tftpio_writer_reserve(io);
-    if (!dp) {
-        nak(-errno, NULL);
-        goto abort;
-    }
-    block = 1;
-    last_acked = 0;
-    packets_in_window = 0;
-    ap = (struct tftphdr *)ackbuf;
-    acksize = oacklen;
-
-    for (;;) {
-        timeout = rexmtval;
-        restarted = sigsetjmp(timeoutbuf, 1);
-        if (oap || restarted) {
-            if (!oap) {
-                ap->th_opcode = htons((uint16_t) ACK);
-                ap->th_block = htons(last_acked);
-                acksize = 4;
-            }
-            /*
-             * For a WRQ, an OACK replaces ACK 0.  Once DATA 1 has been
-             * received, retransmissions use the most recent window ACK.
-             */
-            r_timeout = timeout;
-            if (send(peer, ap, acksize, 0) != acksize) {
-                tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
-                goto abort;
-            }
-        }
-        r_timeout = timeout;
-        for (;;) {
-            n = recv_time(peer, dp, PKTSIZE, 0, &r_timeout);
-            if (n < 0) {
-                tftpd_log(LOG_WARNING, "tftpd: read: %m");
-                goto abort;
-            }
-            dp_opcode = ntohs((uint16_t) dp->th_opcode);
-            dp_block = ntohs((uint16_t) dp->th_block);
-            if (dp_opcode == ERROR)
-                goto abort;
-            if (dp_opcode == DATA) {
-                if (dp_block == block)
-                    break;
-                if (dp_block == last_acked) {
-                    ap->th_opcode = htons((uint16_t) ACK);
-                    ap->th_block = htons(last_acked);
-                    (void)send(peer, ap, 4, 0);
-                }
-            }
-        }
-        oap = NULL;
-        if (n < 4 || n - 4 > segsize) {
-            nak(EBADOP, "Data packet too large");
-            goto abort;
-        }
-        size = n - 4;
-        tftpio_writer_publish(io, size);
-        final = size != segsize;
-        packets_in_window++;
-        if (!++block)
-            block = rollover_val;
-        if (final || packets_in_window == windowsize) {
-            last_acked = dp_block;
-            packets_in_window = 0;
-            ap->th_opcode = htons((uint16_t) ACK);
-            ap->th_block = htons(last_acked);
-            acksize = 4;
-            if (tftpio_writer_drain(io) < 0) {
-                nak(-errno, NULL);
-                goto abort;
-            }
-            if (send(peer, ap, acksize, 0) != acksize) {
-                tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
-                goto abort;
-            }
-            if (final)
-                break;
-        }
-        dp = tftpio_writer_reserve(io);
-        if (!dp) {
-            nak(-errno, NULL);
-            goto abort;
-        }
-    }
-    tftpio_stop(io);
-    io = NULL;
-    (void)fclose(file);         /* close data file */
-    file = NULL;
-
-    timeout_quit = 1;           /* just quit on timeout */
-    n = recv_time(peer, buf, sizeof(buf), 0, &timeout); /* normally times out and quits */
-    timeout_quit = 0;
-
-    if (n >= 4 &&               /* if read some data */
-        ntohs(((struct tftphdr *)buf)->th_opcode) == DATA &&
-        last_acked == ntohs(((struct tftphdr *)buf)->th_block)) {
-        (void)send(peer, ackbuf, 4, 0); /* resend final ack */
-    }
-  abort:
-    tftpio_stop(io);
-    io = NULL;
-    if (file) {
-        (void)fclose(file);
-        file = NULL;
-    }
-    return;
-#endif /* HAVE_PTHREAD */
 }
 
 static const char *const errmsgs[] = {

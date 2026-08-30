@@ -287,7 +287,8 @@ struct tftpio *tftpio_reader_start(FILE *file, int convert,
     return io_start(file, convert, slots, window, blocksize, IO_READ);
 }
 
-int tftpio_reader_window(struct tftpio *io, unsigned int *count, int *final)
+static int tftpio_reader_window(struct tftpio *io, unsigned int *count,
+                                int *final)
 {
     int error;
 
@@ -306,19 +307,19 @@ int tftpio_reader_window(struct tftpio *io, unsigned int *count, int *final)
     return error ? -error : 0;
 }
 
-struct tftphdr *tftpio_reader_packet(struct tftpio *io, unsigned int n)
+static struct tftphdr *tftpio_reader_packet(struct tftpio *io, unsigned int n)
 {
     return (struct tftphdr *)(io->packets +
                               (size_t)((io->head + n) % io->slots) *
                               io->packetsize);
 }
 
-int tftpio_reader_length(struct tftpio *io, unsigned int n)
+static int tftpio_reader_length(struct tftpio *io, unsigned int n)
 {
     return io->lengths[(io->head + n) % io->slots];
 }
 
-void tftpio_reader_release(struct tftpio *io)
+static void tftpio_reader_release(struct tftpio *io)
 {
     pthread_mutex_lock(&io->lock);
     if (io->held) {
@@ -339,7 +340,7 @@ struct tftpio *tftpio_writer_start(FILE *file, int convert,
     return io_start(file, convert, slots, 0, blocksize, IO_WRITE);
 }
 
-struct tftphdr *tftpio_writer_reserve(struct tftpio *io)
+static struct tftphdr *tftpio_writer_reserve(struct tftpio *io)
 {
     struct tftphdr *dp;
 
@@ -358,7 +359,7 @@ struct tftphdr *tftpio_writer_reserve(struct tftpio *io)
     return dp;
 }
 
-void tftpio_writer_publish(struct tftpio *io, int length)
+static void tftpio_writer_publish(struct tftpio *io, int length)
 {
     pthread_mutex_lock(&io->lock);
     io->lengths[io->tail] = length;
@@ -369,7 +370,7 @@ void tftpio_writer_publish(struct tftpio *io, int length)
     pthread_mutex_unlock(&io->lock);
 }
 
-int tftpio_writer_drain(struct tftpio *io)
+static int tftpio_writer_drain(struct tftpio *io)
 {
     int error;
 
@@ -405,5 +406,52 @@ void tftpio_stop(struct tftpio *io)
     xfree(io->packets);
     xfree(io);
 }
+
+static int tftpio_xfer_read_window(void *vctx, unsigned int *count,
+                                   int *final)
+{
+    return tftpio_reader_window(vctx, count, final) < 0 ? -1 : 0;
+}
+
+static struct tftphdr *tftpio_xfer_read_packet(void *vctx, unsigned int n)
+{
+    return tftpio_reader_packet(vctx, n);
+}
+
+static int tftpio_xfer_read_length(void *vctx, unsigned int n)
+{
+    return tftpio_reader_length(vctx, n);
+}
+
+static void tftpio_xfer_read_release(void *vctx)
+{
+    tftpio_reader_release(vctx);
+}
+
+static struct tftphdr *tftpio_xfer_write_reserve(void *vctx)
+{
+    return tftpio_writer_reserve(vctx);
+}
+
+static int tftpio_xfer_write_publish(void *vctx, int length)
+{
+    tftpio_writer_publish(vctx, length);
+    return 0;
+}
+
+static int tftpio_xfer_write_drain(void *vctx)
+{
+    return tftpio_writer_drain(vctx) < 0 ? -1 : 0;
+}
+
+const struct tftp_xfer_io_ops tftpio_xfer_io_ops = {
+    tftpio_xfer_read_window,
+    tftpio_xfer_read_packet,
+    tftpio_xfer_read_length,
+    tftpio_xfer_read_release,
+    tftpio_xfer_write_reserve,
+    tftpio_xfer_write_publish,
+    tftpio_xfer_write_drain
+};
 
 #endif /* HAVE_PTHREAD */

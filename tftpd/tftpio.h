@@ -8,25 +8,18 @@
 #define TFTPD_TFTPIO_H
 
 #include "config.h"
+#include "common/tftp-xfer.h"
 
 #ifdef HAVE_PTHREAD
 
-struct tftphdr;
 struct tftpio;
 
 struct tftpio *tftpio_reader_start(FILE *, int, unsigned int, unsigned int,
                                    unsigned int);
-int tftpio_reader_window(struct tftpio *, unsigned int *, int *);
-struct tftphdr *tftpio_reader_packet(struct tftpio *, unsigned int);
-int tftpio_reader_length(struct tftpio *, unsigned int);
-void tftpio_reader_release(struct tftpio *);
-
 struct tftpio *tftpio_writer_start(FILE *, int, unsigned int, unsigned int);
-struct tftphdr *tftpio_writer_reserve(struct tftpio *);
-void tftpio_writer_publish(struct tftpio *, int);
-int tftpio_writer_drain(struct tftpio *);
-
 void tftpio_stop(struct tftpio *);
+
+extern const struct tftp_xfer_io_ops tftpio_xfer_io_ops;
 
 #endif /* HAVE_PTHREAD */
 #endif /* TFTPD_TFTPIO_H */
