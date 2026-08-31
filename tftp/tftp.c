@@ -16,7 +16,7 @@
 
 extern union sock_addr peeraddr; /* filled in by main */
 extern int f;                    /* the opened socket */
-extern int trace;
+extern bool trace;
 extern int verbose;
 extern int rexmtval;
 extern int maxtimeout;
@@ -40,8 +40,8 @@ static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static void nak(int, const char *);
 static int makerequest(int, const char *, struct tftphdr *, const char *,
                        unsigned int, unsigned int, size_t);
-static int parse_oack(const struct tftphdr *, int, unsigned int,
-                      unsigned int, unsigned int *, unsigned int *);
+static bool parse_oack(const struct tftphdr *, int, unsigned int,
+                       unsigned int, unsigned int *, unsigned int *);
 static void printstats(const char *, uintmax_t);
 static void startclock(void);
 static void stopclock(void);
@@ -136,10 +136,10 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
     int n, size;
-    int convert = !strcmp(mode, "netascii");
+    bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    int requested_options = blocksize != SEGSIZE || requested_window;
+    bool requested_options = blocksize != SEGSIZE || requested_window;
     uint16_t ap_opcode, ap_block;
     volatile uintmax_t amount = 0;
 
@@ -205,7 +205,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         }
     }
 
-    io = tftp_io_reader_start(file, convert, window, window, segsize, 0);
+    io = tftp_io_reader_start(file, convert, window, window, segsize, false);
     if (!io) {
         nak(errno + 100, NULL);
         goto abort;
@@ -272,10 +272,10 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     volatile int initial_reply_len = 0;
     volatile int initial_packet_len = -1;
     int n, size;
-    int convert = !strcmp(mode, "netascii");
+    bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    int requested_options = blocksize != SEGSIZE || requested_window;
+    bool requested_options = blocksize != SEGSIZE || requested_window;
     uint16_t opcode;
     volatile uintmax_t amount = 0;
 
@@ -349,7 +349,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
         break;
     }
 
-    io = tftp_io_writer_start(file, convert, window, segsize, 0);
+    io = tftp_io_writer_start(file, convert, window, segsize, false);
     if (!io) {
         nak(errno + 100, NULL);
         goto abort;
@@ -358,7 +358,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     xfer.blocksize = segsize;
     xfer.windowsize = window;
     xfer.rollover = 0;
-    xfer.resend_oack = 0;
+    xfer.resend_oack = false;
     xfer.control = ackbuf;
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
@@ -476,7 +476,7 @@ makerequest(int request, const char *name,
  * client accepts only options it requested, and rejects malformed,
  * duplicate, or unexpected option pairs.
  */
-static int
+static bool
 parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
            unsigned int requested_window, unsigned int *negotiated_block,
            unsigned int *negotiated_window)
@@ -484,10 +484,12 @@ parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
     const char *cp, *end, *nul;
     char *value_end;
     unsigned long value;
-    int found = 0, block_found = 0, window_found = 0;
+    bool found = false;
+    bool block_found = false;
+    bool window_found = false;
 
     if (length <= 2 || ntohs(tp->th_opcode) != OACK)
-        return 0;
+        return false;
     *negotiated_block = SEGSIZE;
     *negotiated_window = 1;
     cp = (const char *)&tp->th_stuff;
@@ -497,33 +499,33 @@ parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
 
         nul = memchr(cp, '\0', (size_t)(end - cp));
         if (!nul || nul == cp)
-            return 0;
+            return false;
         cp = nul + 1;
         if (cp >= end)
-            return 0;
+            return false;
         nul = memchr(cp, '\0', (size_t)(end - cp));
         if (!nul || nul == cp)
-            return 0;
+            return false;
         errno = 0;
         value = strtoul(cp, &value_end, 10);
         if (errno || value_end != nul)
-            return 0;
+            return false;
         if (!strcasecmp(option, "blksize")) {
             if (block_found || requested_block == SEGSIZE ||
                 value < 8 || value > requested_block)
-                return 0;
+                return false;
             *negotiated_block = (unsigned int)value;
-            block_found = 1;
+            block_found = true;
         } else if (!strcasecmp(option, "windowsize")) {
             if (window_found || !requested_window ||
                 value < 1 || value > requested_window)
-                return 0;
+                return false;
             *negotiated_window = (unsigned int)value;
-            window_found = 1;
+            window_found = true;
         } else {
-            return 0;
+            return false;
         }
-        found = 1;
+        found = true;
         cp = nul + 1;
     }
     return found;

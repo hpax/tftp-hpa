@@ -59,10 +59,10 @@ static int ai_fam_sock = AF_INET;
 union sock_addr peeraddr;
 int f = -1;
 static uint16_t port;
-int trace;
+bool trace;
 int verbose;
-static int literal;
-static int connected;
+static bool literal;
+static bool connected;
 static const struct modes *mode;
 #ifdef WITH_READLINE
 static char *line = NULL;
@@ -76,7 +76,7 @@ static const char *const prompt = "tftp> ";
 sigjmp_buf toplevel;
 static void intr(int);
 static const struct servent *sp;
-static int portrange = 0;
+static bool portrange;
 static unsigned int portrange_from = 0;
 static unsigned int portrange_to = 0;
 unsigned int blocksize = SEGSIZE;
@@ -104,8 +104,8 @@ static void command(void);
 
 static void getusage(const char *);
 static int makeargv(char *, char **);
-static int parse_uint_range(const char *, unsigned int, unsigned int,
-                            unsigned int *);
+static bool parse_uint_range(const char *, unsigned int, unsigned int,
+                             unsigned int *);
 static void putusage(const char *);
 static void settftpmode(const struct modes *);
 
@@ -203,8 +203,8 @@ static noreturn void usage(int errcode)
     exit(errcode);
 }
 
-static int parse_uint_range(const char *arg, unsigned int minimum,
-                            unsigned int maximum, unsigned int *value)
+static bool parse_uint_range(const char *arg, unsigned int minimum,
+                             unsigned int maximum, unsigned int *value)
 {
     char *end;
     unsigned long parsed;
@@ -213,10 +213,10 @@ static int parse_uint_range(const char *arg, unsigned int minimum,
     parsed = strtoul(arg, &end, 10);
     if (errno || *arg == '\0' || *end || parsed < minimum ||
         parsed > maximum)
-        return 0;
+        return false;
 
     *value = (unsigned int)parsed;
-    return 1;
+    return true;
 }
 
 static const struct option long_options[] = {
@@ -246,7 +246,7 @@ int main(int argc, char *argv[])
     union sock_addr sa;
     int optc;
     static int pargc, peerargc;
-    static int iscmd = 0;
+    static bool iscmd;
     static char **pargv;
     char *peerargv[3];
 
@@ -300,7 +300,7 @@ int main(int argc, char *argv[])
             settftpmode(MODE_NETASCII);
             break;
         case 'l':
-            literal = 1;
+            literal = true;
             break;
         case 'm':
         {
@@ -319,7 +319,7 @@ int main(int argc, char *argv[])
             break;
         }
         case 'c':
-            iscmd = 1;
+            iscmd = true;
             break;
         case 'R':
             if (sscanf(optarg, "%u:%u", &portrange_from, &portrange_to) != 2
@@ -328,7 +328,7 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Bad port range: %s\n", optarg);
                 exit(EX_USAGE);
             }
-            portrange = 1;
+            portrange = true;
             break;
         case 'B':
             if (!parse_uint_range(optarg, 8, MAX_SEGSIZE, &blocksize)) {
@@ -503,7 +503,7 @@ static void setpeer(int argc, char *argv[])
     if (err) {
         printf("Error: %s\n", gai_strerror(err));
         printf("%s: unknown host\n", argv[1]);
-        connected = 0;
+        connected = false;
         return;
     }
     ai_fam = peeraddr.sa.sa_family;
@@ -540,7 +540,7 @@ static void setpeer(int argc, char *argv[])
             myport = strtoul(argv[2], &ep, 10);
             if (*ep || myport > 65535UL) {
                 printf("%s: bad port number\n", argv[2]);
-                connected = 0;
+                connected = false;
                 return;
             }
             port = htons((uint16_t) myport);
@@ -557,7 +557,7 @@ static void setpeer(int argc, char *argv[])
         printf("Connected to %s (%s), port %u\n",
                hostname, tp, (unsigned int)ntohs(port));
     }
-    connected = 1;
+    connected = true;
 }
 
 static void modecmd(int argc, char *argv[])
@@ -648,11 +648,11 @@ static void put(int argc, char *argv[])
         if (err) {
             printf("Error: %s\n", gai_strerror(err));
             printf("%s: unknown host\n", argv[1]);
-            connected = 0;
+            connected = false;
             return;
         }
         ai_fam = peeraddr.sa.sa_family;
-        connected = 1;
+        connected = true;
     }
     if (!connected) {
         printf("No target machine specified.\n");
@@ -745,7 +745,7 @@ static void get(int argc, char *argv[])
                 continue;
             }
             ai_fam = peeraddr.sa.sa_family;
-            connected = 1;
+            connected = true;
         }
         if (argc < 4) {
             cp = argc == 3 ? argv[2] : tail(src);
