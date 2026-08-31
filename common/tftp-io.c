@@ -75,12 +75,14 @@ static int read_packet(struct tftp_io *io, struct tftphdr *dp)
     char *p;
     int c;
     unsigned int i;
-    ssize_t n;
+    size_t n;
 
     if (!io->convert) {
-        n = read(fileno(io->file), dp->th_data, io->blocksize);
-        if (n < 0)
+        n = fread(dp->th_data, 1, io->blocksize, io->file);
+        if (n < io->blocksize && ferror(io->file)) {
+            errno = EIO;
             return -1;
+        }
         return (int)n;
     }
 
@@ -114,24 +116,11 @@ static int write_packet(struct tftp_io *io, const struct tftphdr *dp, int count)
     const char *p;
     int c;
     int ct;
-    ssize_t n;
 
     if (!io->convert) {
-        p = dp->th_data;
-        ct = count;
-        while (ct) {
-            n = write(fileno(io->file), p, (size_t)ct);
-            if (n < 0) {
-                if (errno == EINTR)
-                    continue;
-                return -1;
-            }
-            if (!n) {
-                errno = EIO;
-                return -1;
-            }
-            p += n;
-            ct -= (int)n;
+        if (fwrite(dp->th_data, 1, count, io->file) != (size_t)count) {
+            errno = EIO;
+            return -1;
         }
         return count;
     }
