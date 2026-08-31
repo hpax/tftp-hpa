@@ -176,7 +176,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
 
     result->last_block = 0;
     result->packet = NULL;
-    if (!xfer->io_ops) {
+    if (!xfer->io_ops || !xfer->io_ops->write_finish) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
         return;
@@ -277,6 +277,14 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             ack->th_opcode = htons((uint16_t)ACK);
             ack->th_block = htons(last_acked);
             if (xfer->io_ops->write_drain(xfer->io_context) < 0) {
+                if (!errno)
+                    errno = EIO;
+                finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno,
+                       bytes);
+                return;
+            }
+            if (final &&
+                xfer->io_ops->write_finish(xfer->io_context) < 0) {
                 if (!errno)
                     errno = EIO;
                 finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno,

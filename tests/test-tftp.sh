@@ -159,6 +159,14 @@ create_test_files() {
     # Text file with multiple lines
     printf "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n" > "$TEST_DIR/multiline.txt"
 
+    # CR NUL pairs cross a 512-byte packet and a four-packet window.
+    {
+	head -c 511 /dev/zero | tr '\000' A
+	printf '\r'
+	head -c 1534 /dev/zero | tr '\000' B
+	printf '\rtrailing\r'
+    } > "$TEST_DIR/netascii-boundary.txt"
+
     # Sparse ASCII file
     seq 1 100 > "$TEST_DIR/numbers.txt"
 
@@ -278,8 +286,8 @@ main() {
     # Give server a moment to start
     sleep 2
 
-    local -a testfiles=(small.txt multiline.txt numbers.txt medium.bin
-			window-boundary.bin large.bin)
+    local -a testfiles=(small.txt multiline.txt netascii-boundary.txt
+			numbers.txt medium.bin window-boundary.bin large.bin)
 
     # The largest supported client window exercises the threaded packet ring.
     for BLKSIZE in $TFTP_TEST_BLKSIZES; do

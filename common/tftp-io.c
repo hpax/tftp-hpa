@@ -23,8 +23,15 @@ enum slot_state {
     SLOT_WRITING
 };
 
+struct tftp_io_ops {
+    int (*read_packet)(struct tftp_io *, struct tftphdr *);
+    int (*write_packet)(struct tftp_io *, const struct tftphdr *, int);
+    int (*write_finish)(struct tftp_io *);
+};
+
 struct tftp_io {
     FILE *file;
+    const struct tftp_io_ops *ops;
     char *packets;
     int *lengths;
     enum slot_state *states;
@@ -36,13 +43,13 @@ struct tftp_io {
     unsigned int tail;
     unsigned int count;
     unsigned int held;
-    int convert;
     int error;
     int eof;
     int stopped;
     int threaded;
     int newline;
     int prevchar;
+    int write_cr;
 #ifdef HAVE_PTHREAD
     pthread_t thread;
     pthread_mutex_t lock;
@@ -70,21 +77,23 @@ static void io_error(struct tftp_io *io, int error)
         io->error = error;
 }
 
-static int read_packet(struct tftp_io *io, struct tftphdr *dp)
+static int octet_read_packet(struct tftp_io *io, struct tftphdr *dp)
+{
+    size_t n;
+
+    n = fread(dp->th_data, 1, io->blocksize, io->file);
+    if (n < io->blocksize && ferror(io->file)) {
+        errno = EIO;
+        return -1;
+    }
+    return (int)n;
+}
+
+static int netascii_read_packet(struct tftp_io *io, struct tftphdr *dp)
 {
     char *p;
     int c;
     unsigned int i;
-    size_t n;
-
-    if (!io->convert) {
-        n = fread(dp->th_data, 1, io->blocksize, io->file);
-        if (n < io->blocksize && ferror(io->file)) {
-            errno = EIO;
-            return -1;
-        }
-        return (int)n;
-    }
 
     p = dp->th_data;
     for (i = 0; i < io->blocksize; i++) {
@@ -111,43 +120,95 @@ static int read_packet(struct tftp_io *io, struct tftphdr *dp)
     return (int)(p - dp->th_data);
 }
 
-static int write_packet(struct tftp_io *io, const struct tftphdr *dp, int count)
+static int octet_write_packet(struct tftp_io *io, const struct tftphdr *dp,
+                              int count)
+{
+    if (fwrite(dp->th_data, 1, count, io->file) != (size_t)count) {
+        errno = EIO;
+        return -1;
+    }
+    return count;
+}
+
+static int netascii_write_packet(struct tftp_io *io,
+                                 const struct tftphdr *dp, int count)
 {
     const char *p;
     int c;
     int ct;
 
-    if (!io->convert) {
-        if (fwrite(dp->th_data, 1, count, io->file) != (size_t)count) {
-            errno = EIO;
-            return -1;
-        }
-        return count;
-    }
-
     p = dp->th_data;
     ct = count;
     while (ct--) {
         c = *p++;
-        if (io->prevchar == '\r') {
+        if (io->write_cr) {
             if (c == '\n') {
-                if (fseek(io->file, -1, SEEK_CUR)) {
-                    errno = EIO;
-                    return -1;
-                }
+                c = '\n';
             } else if (c == '\0') {
-                io->prevchar = c;
-                continue;
+                c = '\r';
+            } else if (putc('\r', io->file) == EOF) {
+                errno = EIO;
+                return -1;
             }
+            io->write_cr = 0;
+            if (putc(c, io->file) == EOF) {
+                errno = EIO;
+                return -1;
+            }
+            continue;
+        }
+        if (c == '\r') {
+            io->write_cr = 1;
+            continue;
         }
         if (putc(c, io->file) == EOF) {
             errno = EIO;
             return -1;
         }
-        io->prevchar = c;
     }
     return count;
 }
+
+static int octet_write_finish(struct tftp_io *io)
+{
+    errno = 0;
+    if (fflush(io->file)) {
+        if (!errno)
+            errno = EIO;
+        return -1;
+    }
+    return 0;
+}
+
+static int netascii_write_finish(struct tftp_io *io)
+{
+    if (io->write_cr) {
+        if (putc('\r', io->file) == EOF) {
+            errno = EIO;
+            return -1;
+        }
+        io->write_cr = 0;
+    }
+    errno = 0;
+    if (fflush(io->file)) {
+        if (!errno)
+            errno = EIO;
+        return -1;
+    }
+    return 0;
+}
+
+static const struct tftp_io_ops octet_io_ops = {
+    octet_read_packet,
+    octet_write_packet,
+    octet_write_finish
+};
+
+static const struct tftp_io_ops netascii_io_ops = {
+    netascii_read_packet,
+    netascii_write_packet,
+    netascii_write_finish
+};
 
 #ifdef HAVE_PTHREAD
 static void *reader_thread(void *arg)
@@ -167,7 +228,7 @@ static void *reader_thread(void *arg)
         dp = io_packet(io, io->tail);
         pthread_mutex_unlock(&io->lock);
 
-        length = read_packet(io, dp);
+        length = io->ops->read_packet(io, dp);
 
         pthread_mutex_lock(&io->lock);
         if (length < 0) {
@@ -211,7 +272,7 @@ static void *writer_thread(void *arg)
         length = io->lengths[io->head];
         pthread_mutex_unlock(&io->lock);
 
-        if (write_packet(io, dp, length) != length) {
+        if (io->ops->write_packet(io, dp, length) != length) {
             pthread_mutex_lock(&io->lock);
             io_error(io, errno);
             pthread_cond_broadcast(&io->changed);
@@ -256,7 +317,7 @@ static struct tftp_io *io_start(FILE *file, int convert, unsigned int slots,
     io->window = window;
     io->blocksize = blocksize;
     io->packetsize = ((size_t)blocksize + 5) & ~(size_t)1;
-    io->convert = convert;
+    io->ops = convert ? &netascii_io_ops : &octet_io_ops;
     io->threaded = threaded;
     io->prevchar = -1;
     io->packets = xcalloc(io->slots, io->packetsize);
@@ -328,7 +389,7 @@ static int tftp_io_read_window(void *vctx, unsigned int *count, int *final)
     {
         while (io->count < io->window && !io->eof && !io->error) {
             dp = io_packet(io, io->tail);
-            length = read_packet(io, dp);
+            length = io->ops->read_packet(io, dp);
             if (length < 0) {
                 io_error(io, errno);
                 break;
@@ -497,7 +558,7 @@ static int tftp_io_write_drain(void *vctx)
             io->states[io->head] = SLOT_WRITING;
             dp = io_packet(io, io->head);
             length = io->lengths[io->head];
-            if (write_packet(io, dp, length) != length) {
+            if (io->ops->write_packet(io, dp, length) != length) {
                 io_error(io, errno);
                 break;
             }
@@ -522,6 +583,18 @@ static int tftp_io_write_drain(void *vctx)
     if (error)
         errno = error;
     return error ? -1 : 0;
+}
+
+static int tftp_io_write_finish(void *vctx)
+{
+    struct tftp_io *io = vctx;
+
+    if (io->ops->write_finish(io) < 0) {
+        io_error(io, errno);
+        errno = io->error;
+        return -1;
+    }
+    return 0;
 }
 
 void tftp_io_stop(struct tftp_io *io)
@@ -552,5 +625,6 @@ const struct tftp_xfer_io_ops tftp_io_xfer_ops = {
     tftp_io_read_release,
     tftp_io_xfer_write_reserve,
     tftp_io_write_publish,
-    tftp_io_write_drain
+    tftp_io_write_drain,
+    tftp_io_write_finish
 };

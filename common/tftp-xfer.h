@@ -50,9 +50,10 @@ struct tftp_xfer_ops {
  * The file I/O adapter.  The transfer engine owns the protocol state, while
  * the adapter can pipeline file I/O independently.  A read window remains
  * valid until read_release() and a write packet remains reserved until
- * write_publish().  All callbacks return -1 and set errno on failure,
- * except for callbacks declared void.  write_reserve() must provide room
- * for a TFTP header and xfer->blocksize bytes of data.
+ * write_publish().  write_finish() is called after draining only the final
+ * receive window and before its ACK.  All callbacks return -1 and set errno
+ * on failure, except for callbacks declared void.  write_reserve() must
+ * provide room for a TFTP header and xfer->blocksize bytes of data.
  */
 struct tftp_xfer_io_ops {
     int (*read_window)(void *, unsigned int *, int *);
@@ -62,6 +63,7 @@ struct tftp_xfer_io_ops {
     struct tftphdr *(*write_reserve)(void *);
     int (*write_publish)(void *, int);
     int (*write_drain)(void *);
+    int (*write_finish)(void *);
 };
 
 struct tftp_xfer {
