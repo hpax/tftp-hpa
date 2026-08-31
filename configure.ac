@@ -67,6 +67,7 @@ AC_CHECK_HEADERS_ONCE(locale.h)
 AC_CHECK_HEADERS_ONCE(paths.h)
 AC_CHECK_HEADERS_ONCE(poll.h)
 AC_CHECK_HEADERS_ONCE(setjmp.h)
+AC_CHECK_HEADERS_ONCE(stdbool.h)
 AC_CHECK_HEADERS_ONCE(stdint.h)
 AC_CHECK_HEADERS_ONCE(stdnoreturn.h)
 AC_CHECK_HEADERS_ONCE(strings.h)
@@ -81,6 +82,9 @@ PA_CHECK_INTTYPES_H_SANE
 
 dnl This is needed on some versions of FreeBSD...
 AC_CHECK_HEADERS_ONCE(machine/param.h)
+
+dnl Looking for bool variants just in case <stdbool.h> is missing
+AC_CHECK_TYPES([_Bool, bool])
 
 dnl Windows...
 PA_ADD_HEADERS(windows.h)
@@ -108,6 +112,7 @@ AC_CHECK_TYPES(uint32_t)
 AC_CHECK_TYPES(uint64_t)
 
 AC_CHECK_TYPES(socklen_t)
+
 
 AC_SEARCH_LIBS(socket, [socket ws2_32 wsock32], ,
  [AC_MSG_ERROR(socket library not found)])

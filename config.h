@@ -35,6 +35,22 @@
 #include <limits.h>
 #include <stdarg.h>
 
+#ifdef HAVE_STDBOOL_H
+#include <stdbool.h>
+#elif !defined(HAVE_BOOL)       /* bool, true, false as keywords? */
+#if defined(HAVE__BOOL)
+typedef _Bool bool;
+#else
+typedef char bool;
+#endif
+#ifndef true
+#define true 1
+#endif
+#ifndef false
+#define false 0
+#endif
+#endif
+
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
