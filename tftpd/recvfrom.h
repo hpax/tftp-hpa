@@ -17,8 +17,8 @@
 int
 myrecvfrom(int s, void *buf, int len, unsigned int flags,
            union sock_addr *from, union sock_addr *myaddr);
-void tftpd_config_socket(int fd, int peer);
-void set_socket_nonblock(int fd, int flag);
+void tftpd_config_socket(int fd, bool peer);
+void set_socket_nonblock(int fd, bool flag);
 
 /* On Cygwin, a nonblocking socket can cause immediate return from select?! */
 #ifdef __CYGWIN__

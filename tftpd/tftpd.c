@@ -52,7 +52,7 @@ static int peer;
 static unsigned long timeout  = TIMEOUT;        /* Current timeout value */
 static unsigned long rexmtval = TIMEOUT;       /* Basic timeout value */
 static unsigned long maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
-static int timeout_quit = 0;
+static bool timeout_quit;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static uint16_t rollover_val = 0;
@@ -82,16 +82,16 @@ static const char *tmp_p;
 
 static union sock_addr from;
 static off_t tsize;
-static int tsize_ok;
+static bool tsize_ok;
 
 static int ndirs;
 static const char * const **dirs;
 
-static int secure = 0;
-static int cancreate = 0;
-static int unixperms = 0;
-static int portrange = 0;
-static int reject_all_options;
+static bool secure;
+static bool cancreate;
+static bool unixperms;
+static bool portrange;
+static bool reject_all_options;
 static unsigned int portrange_from, portrange_to;
 int verbosity = 0;
 
@@ -108,19 +108,19 @@ static void timer(int);
 static void do_opt(const char *, const char *, char **);
 static void negotiate_windowsize(char **);
 static unsigned int io_ring_slots(void);
-static int io_is_threaded(void);
+static bool io_is_threaded(void);
 
-static int set_blksize(uintmax_t *);
-static int set_blksize2(uintmax_t *);
-static int set_tsize(uintmax_t *);
-static int set_timeout(uintmax_t *);
-static int set_utimeout(uintmax_t *);
-static int set_rollover(uintmax_t *);
-static int set_windowsize(uintmax_t *);
+static bool set_blksize(uintmax_t *);
+static bool set_blksize2(uintmax_t *);
+static bool set_tsize(uintmax_t *);
+static bool set_timeout(uintmax_t *);
+static bool set_utimeout(uintmax_t *);
+static bool set_rollover(uintmax_t *);
+static bool set_windowsize(uintmax_t *);
 
 struct options {
     const char *o_opt;
-    int (*o_fnc)(uintmax_t *);
+    bool (*o_fnc)(uintmax_t *);
 };
 static struct options options[] = {
     {"blksize",  set_blksize},
@@ -236,7 +236,7 @@ static struct rule *read_remap_rules(const char *rulefile)
 /*
  * Rules for locking files; return 0 on success, -1 on failure
  */
-static int lock_file(int fd, int lock_write)
+static int lock_file(int fd, bool lock_write)
 {
     (void)lock_write;
 #if defined(HAVE_FCNTL) && HAVE_DECL_F_SETLK
@@ -294,10 +294,10 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
         rv = recv(s, rbuf, len, flags | MSG_DONTWAIT);
         err = errno;
 #else
-        set_socket_nonblock(s, 1);
+        set_socket_nonblock(s, true);
         rv = recv(s, rbuf, len, flags);
         err = errno;
-        set_socket_nonblock(s, 0);
+        set_socket_nonblock(s, false);
 #endif
     } while (rv < 0 && (E_WOULD_BLOCK(err) || err == EINTR));
 
@@ -363,9 +363,9 @@ static void daemon_xfer_dally(uint16_t last_acked)
 {
     int n;
 
-    timeout_quit = 1;
+    timeout_quit = true;
     n = recv_time(peer, buf, sizeof(buf), 0, &timeout);
-    timeout_quit = 0;
+    timeout_quit = false;
 
     if (n >= 4 &&
         ntohs(((struct tftphdr *)buf)->th_opcode) == DATA &&
@@ -468,19 +468,19 @@ int main(int argc, char **argv)
     union sock_addr myaddr;
     int n;
     int fd = -1;
-    int standalone = 0;         /* Standalone (listen) mode */
-    int nodaemon = 0;           /* Do not detach process */
-    int systemd = 0;            /* Not using systemd socket activation */
+    bool standalone = false;    /* Standalone (listen) mode */
+    bool nodaemon = false;      /* Do not detach process */
+    bool systemd = false;       /* Not using systemd socket activation */
     pid_t pid;
     mode_t my_umask = 0;
-    int spec_umask = 0;
+    bool spec_umask = false;
     int c;
     int setrv;
     int die;
     intmax_t waittime = -1;      /* No waittime specified (yet) */
     const char *user = "nobody";   /* Default user */
     char *ep;
-    int use_stderr = 0;
+    bool use_stderr = false;
     const char *map_test_file = NULL;
 #ifdef WITH_REGEX
     char *rewrite_file = NULL;
@@ -530,23 +530,23 @@ int main(int argc, char **argv)
             break;
 #endif
         case 'c':
-            cancreate = 1;
+            cancreate = true;
             break;
         case 's':
-            secure = 1;
+            secure = true;
             break;
         case 'p':
-            unixperms = 1;
+            unixperms = true;
             break;
         case 'l':
-            standalone = 1;
+            standalone = true;
             break;
         case 'L':
-            standalone = 1;
-            nodaemon = 1;
+            standalone = true;
+            nodaemon = true;
             break;
         case 'a':
-            standalone = 1;
+            standalone = true;
             strlist_add(&listen_addrs, optarg);
             break;
         case 't':
@@ -627,7 +627,7 @@ int main(int argc, char **argv)
                     tftpd_log(LOG_ERR, "Bad port range: %s", optarg);
                     exit(EX_USAGE);
                 }
-                portrange = 1;
+                portrange = true;
             }
             break;
         case 'u':
@@ -639,7 +639,7 @@ int main(int argc, char **argv)
                 tftpd_log(LOG_ERR, "Invalid umask: %s", optarg);
                 exit(EX_USAGE);
             }
-            spec_umask = 1;
+            spec_umask = true;
             break;
         case 'r':
             for (opt = options; opt->o_opt; opt++) {
@@ -654,7 +654,7 @@ int main(int argc, char **argv)
             }
             break;
         case OPT_REJECT_ALL:
-            reject_all_options = 1;
+            reject_all_options = true;
             break;
 #ifdef WITH_REGEX
         case 'm':
@@ -677,7 +677,7 @@ int main(int argc, char **argv)
         }
         case OPT_MAP_TEST:
             map_test_file = optarg;
-            use_stderr = 1;
+            use_stderr = true;
             break;
 #endif
         case 'v':
@@ -687,11 +687,11 @@ int main(int argc, char **argv)
             verbosity = atoi(optarg);
             break;
         case OPT_STDERR:
-            use_stderr = 1;
+            use_stderr = true;
             break;
         case OPT_SYSTEMD:
-            nodaemon = 1;
-            systemd = 1;
+            nodaemon = true;
+            systemd = true;
             break;
         case 'V':
             /* Print configuration to stdout and exit */
@@ -826,7 +826,7 @@ int main(int argc, char **argv)
         /* Daemonize this process */
         /* Note: when running in secure mode (-s), we must not chdir, since
            we are already in the proper directory. */
-        if (!nodaemon && daemon(secure, 1) < 0) {
+        if (!nodaemon && daemon(secure, true) < 0) {
             tftpd_log(LOG_ERR, "cannot daemonize: %m");
             exit(EX_OSERR);
         }
@@ -857,8 +857,9 @@ int main(int argc, char **argv)
             pidfile = NULL;
         } else {
             bool err = fprintf(pf, "%d\n", getpid()) < 0;
-            err |= ferror(pf);
-            err |= fclose(pf);
+            bool write_error = !!ferror(pf);
+            bool close_error = fclose(pf) != 0;
+            err = err || write_error || close_error;
             if (err)
                 tftpd_log(LOG_ERR, "error writing pid file '%s': %m", pidfile);
         }
@@ -866,8 +867,8 @@ int main(int argc, char **argv)
 
     cursor = 0;
     while ((fd = pollset_next(listen_set, &cursor, NULL)) >= 0) {
-        tftpd_config_socket(fd, 0);
-        cygwin_set_socket_nonblock(fd, 0);
+        tftpd_config_socket(fd, false);
+        cygwin_set_socket_nonblock(fd, false);
     }
 
     /* This means we don't want to wait() for children */
@@ -925,9 +926,9 @@ int main(int argc, char **argv)
         if (fd <= 0)
             continue;
 
-        cygwin_set_socket_nonblock(fd, 1);
+        cygwin_set_socket_nonblock(fd, true);
         n = myrecvfrom(fd, buf, sizeof(buf), 0, &from, &myaddr);
-        cygwin_set_socket_nonblock(fd, 0);
+        cygwin_set_socket_nonblock(fd, false);
 
         if (n < 0) {
             if (E_WOULD_BLOCK(errno) || errno == EINTR) {
@@ -1093,7 +1094,7 @@ int main(int argc, char **argv)
         exit(EX_IOERR);
     }
 
-    tftpd_config_socket(peer, 1);
+    tftpd_config_socket(peer, true);
 
     tp = (struct tftphdr *)buf;
     tp_opcode = ntohs(tp->th_opcode);
@@ -1111,10 +1112,10 @@ static void tftp_recvfile(const struct formats *, struct tftphdr *, int);
 static const struct formats formats[] = {
     {
     "netascii", rewrite_access, validate_access, tftp_sendfile,
-            tftp_recvfile, 1}, {
+            tftp_recvfile, true}, {
     "octet", rewrite_access, validate_access, tftp_sendfile,
-            tftp_recvfile, 0}, {
-    NULL, NULL, NULL, NULL, NULL, 0}
+            tftp_recvfile, false}, {
+    NULL, NULL, NULL, NULL, NULL, false}
 };
 
 /*
@@ -1234,40 +1235,40 @@ static int tftp(struct tftphdr *tp, int size)
     exit(0);                    /* Request completed */
 }
 
-static int blksize_set;
+static bool blksize_set;
 
 /*
  * Set a non-standard block size (c.f. RFC2348)
  */
-static int set_blksize(uintmax_t *vp)
+static bool set_blksize(uintmax_t *vp)
 {
     uintmax_t sz = *vp;
 
     if (blksize_set)
-        return 0;
+        return false;
 
     if (sz < 8)
-        return 0;
+        return false;
     else if (sz > max_blksize)
         sz = max_blksize;
 
     *vp = segsize = sz;
-    blksize_set = 1;
-    return 1;
+    blksize_set = true;
+    return true;
 }
 
 /*
  * Set a power-of-two block size (nonstandard)
  */
-static int set_blksize2(uintmax_t *vp)
+static bool set_blksize2(uintmax_t *vp)
 {
     uintmax_t sz = *vp;
 
     if (blksize_set)
-        return 0;
+        return false;
 
     if (sz < 8)
-        return (0);
+        return false;
     else if (sz > max_blksize)
         sz = max_blksize;
     else
@@ -1282,22 +1283,22 @@ static int set_blksize2(uintmax_t *vp)
     }
 
     *vp = segsize = sz;
-    blksize_set = 1;
-    return 1;
+    blksize_set = true;
+    return true;
 }
 
 /*
  * Set the block number rollover value
  */
-static int set_rollover(uintmax_t *vp)
+static bool set_rollover(uintmax_t *vp)
 {
     uintmax_t ro = *vp;
 
     if (ro > 65535)
-	return 0;
+	return false;
 
     rollover_val = (uint16_t)ro;
-    return 1;
+    return true;
 }
 
 /*
@@ -1307,14 +1308,14 @@ static int set_rollover(uintmax_t *vp)
  */
 #define OPTBUFSIZE	(sizeof(uintmax_t) * CHAR_BIT / 3 + 3)
 
-static int set_windowsize(uintmax_t *vp)
+static bool set_windowsize(uintmax_t *vp)
 {
     if (*vp < 1)
-        return 0;
+        return false;
 
     requested_windowsize = *vp;
 
-    return 1;
+    return true;
 }
 
 /*
@@ -1378,12 +1379,12 @@ static unsigned int io_ring_slots(void)
 #endif
 }
 
-static int io_is_threaded(void)
+static bool io_is_threaded(void)
 {
 #ifdef HAVE_PTHREAD
-    return 1;
+    return true;
 #else
-    return 0;
+    return false;
 #endif
 }
 
@@ -1392,18 +1393,18 @@ static int io_is_threaded(void)
  * For netascii mode, we don't know the size ahead of time;
  * so reject the option.
  */
-static int set_tsize(uintmax_t *vp)
+static bool set_tsize(uintmax_t *vp)
 {
     uintmax_t sz = *vp;
 
     if (!tsize_ok)
-        return 0;
+        return false;
 
     if (sz == 0)
         sz = tsize;
 
     *vp = sz;
-    return 1;
+    return true;
 }
 
 /*
@@ -1411,31 +1412,31 @@ static int set_tsize(uintmax_t *vp)
  * to be the (default) retransmission timeout, but being an
  * integer in seconds it seems a bit limited.
  */
-static int set_timeout(uintmax_t *vp)
+static bool set_timeout(uintmax_t *vp)
 {
     uintmax_t to = *vp;
 
     if (to < 1 || to > 255)
-        return 0;
+        return false;
 
     rexmtval = timeout = to * 1000000UL;
     maxtimeout = rexmtval * TIMEOUT_LIMIT;
 
-    return 1;
+    return true;
 }
 
 /* Similar, but in microseconds.  We allow down to 10 ms. */
-static int set_utimeout(uintmax_t *vp)
+static bool set_utimeout(uintmax_t *vp)
 {
     uintmax_t to = *vp;
 
     if (to < 10000UL || to > 255000000UL)
-        return 0;
+        return false;
 
     rexmtval = timeout = to;
     maxtimeout = rexmtval * TIMEOUT_LIMIT;
 
-    return 1;
+    return true;
 }
 
 /*
@@ -1452,7 +1453,7 @@ static void do_opt(const char *opt, const char *val, char **ap)
     uintmax_t v;
 
     /* Global option-parsing variables initialization */
-    blksize_set = 0;
+    blksize_set = false;
 
     if (reject_all_options)
         return;
@@ -1587,7 +1588,7 @@ static int test_validate_fail(char *filename, int mode,
 static void rewrite_test(FILE *tf)
 {
     static const struct formats test_dummy_format =
-        { "dummy", NULL, test_validate_fail, NULL, NULL, 0 };
+        { "dummy", NULL, test_validate_fail, NULL, NULL, false };
 #ifdef HAVE_IPV6
     /* Dummy addresses from netblocks assigned for documentation */
     static const char phony_ip6_addr[16] =
@@ -1671,7 +1672,7 @@ static int validate_access(char *filename, int mode,
     const char * const **dirp;
     char stdio_mode[3];
 
-    tsize_ok = 0;
+    tsize_ok = false;
     *errmsg = NULL;
 
     if (!secure) {
@@ -1745,7 +1746,7 @@ static int validate_access(char *filename, int mode,
 	}
 #endif
         tsize = 0;
-        tsize_ok = 1;
+        tsize_ok = true;
     }
 
     stdio_mode[0] = (mode == RRQ) ? 'r' : 'w';
@@ -1817,7 +1818,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
-    xfer.resend_oack = 1;
+    xfer.resend_oack = true;
     xfer.control = ackbuf;
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;
@@ -1884,7 +1885,7 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
-    xfer.resend_oack = 0;
+    xfer.resend_oack = false;
     xfer.control = ackbuf;
     xfer.control_size = sizeof(ackbuf);
     xfer.context = &context;

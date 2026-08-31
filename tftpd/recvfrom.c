@@ -31,7 +31,7 @@
  * they are compiled unconditionally.
  */
 
-void set_socket_nonblock(int fd, int flag)
+void set_socket_nonblock(int fd, bool flag)
 {
     int flags;
 
@@ -90,14 +90,14 @@ static void enable_recvdstaddr(int fd)
  *
  * The "peer" flag indicates that this a connected peer socket.
  */
-void tftpd_config_socket(int fd, int peer)
+void tftpd_config_socket(int fd, bool peer)
 {
     /* Set socket as nonblocking */
 #ifdef __CYGWIN__
     /* On Cygwin, a nonblocking socket returns immediately from select()! */
-    set_socket_nonblock(fd, 0);
+    set_socket_nonblock(fd, false);
 #else
-    set_socket_nonblock(fd, 1);
+    set_socket_nonblock(fd, true);
 #endif
 
     /* Disable pmtu discovery (useless for TFTP and breaks things) */
@@ -140,12 +140,12 @@ struct in_pktinfo {
  * Check to see if this is a valid local address, meaning that we can
  * legally bind to it.
  */
-static int address_is_local(const union sock_addr *addr)
+static bool address_is_local(const union sock_addr *addr)
 {
     union sock_addr sa1, sa2;
     int sockfd = -1;
     int e;
-    int rv = 0;
+    bool rv = false;
     socklen_t addrlen;
 
     memcpy(&sa1, addr, sizeof sa1);
@@ -153,18 +153,18 @@ static int address_is_local(const union sock_addr *addr)
     /* Multicast or universal broadcast address? */
     if (sa1.sa.sa_family == AF_INET) {
         if (ntohl(sa1.si.sin_addr.s_addr) >= (224UL << 24))
-            return 0;
+            return false;
 	sa1.si.sin_port = 0;	/* Any port */
     }
 #ifdef HAVE_IPV6
     else if (sa1.sa.sa_family == AF_INET6) {
         if (IN6_IS_ADDR_MULTICAST(&sa1.s6.sin6_addr))
-            return 0;
+            return false;
 	sa1.s6.sin6_port = 0;	/* Any port */
     }
 #endif
     else
-        return 0;
+        return false;
 
     sockfd = socket(sa1.sa.sa_family, SOCK_DGRAM, 0);
     if (sockfd < 0)
@@ -184,10 +184,10 @@ static int address_is_local(const union sock_addr *addr)
         rv = sa1.si.sin_addr.s_addr == sa2.si.sin_addr.s_addr;
 #ifdef HAVE_IPV6
     else if (sa2.sa.sa_family == AF_INET6)
-        rv = IN6_ARE_ADDR_EQUAL(&sa1.s6.sin6_addr, &sa2.s6.sin6_addr);
+        rv = !!IN6_ARE_ADDR_EQUAL(&sa1.s6.sin6_addr, &sa2.s6.sin6_addr);
 #endif
     else
-        rv = 0;
+        rv = false;
 
 err:
     e = errno;
@@ -334,7 +334,7 @@ myrecvfrom(int s, void *buf, int len, unsigned int flags,
         /* If the address is not a valid local address,
          * then bind to any address...
          */
-        if (address_is_local(myaddr) != 1) {
+        if (!address_is_local(myaddr)) {
             if (myaddr->sa.sa_family == AF_INET)
                 ((struct sockaddr_in *)myaddr)->sin_addr.s_addr = INADDR_ANY;
 #ifdef HAVE_IPV6

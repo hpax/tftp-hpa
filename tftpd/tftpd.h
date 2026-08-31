@@ -36,7 +36,7 @@ struct formats {
     int (*f_validate) (char *, int, const struct formats *, const char **);
     void (*f_send) (const struct formats *, struct tftphdr *, int);
     void (*f_recv) (const struct formats *, struct tftphdr *, int);
-    int f_convert;
+    bool f_convert;
 };
 
 #endif

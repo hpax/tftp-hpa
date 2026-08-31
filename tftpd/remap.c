@@ -74,7 +74,7 @@ struct xform_state {
     xform_func xform;
     char *out;
     size_t len;
-    int err;
+    bool err;
 #if WITH_MB
     mbstate_t ps;
 #endif
@@ -118,7 +118,7 @@ static const char *xform_out(struct xform_state *xs, const char *p, size_t len)
             }
         } else {
             /* Conversion error */
-            xs->err = 1;
+            xs->err = true;
             break;
         }
     }
@@ -317,7 +317,7 @@ genmatchstring(char **string, const char *pattern,
 static size_t readescstring(char *buf, char **str)
 {
     char *p = *str;
-    int wasbs = 0;
+    bool wasbs = false;
     size_t len = 0;
 
     while (*p && isspace(*p))
@@ -534,7 +534,7 @@ struct rule *parserulefile(FILE * f)
     int rv;
     unsigned int lineno = 0;
     size_t len;
-    int err = 0;
+    bool err = false;
 
     while ((len = read_line(f, &line, &linesize)) != (size_t)-1) {
         lineno++;
@@ -542,7 +542,7 @@ struct rule *parserulefile(FILE * f)
             parsebuf = xrealloc(parsebuf, parsebufsize = linesize);
         rv = parseline(line, this_rule, lineno, parsebuf);
         if (rv < 0)
-            err = 1;
+            err = true;
         if (rv > 0) {
             *last_rule = this_rule;
             last_rule = &this_rule->next;
@@ -616,10 +616,10 @@ char *rewrite_string(const struct formats *pf,
 
     ruleptr = rules;
     while (ruleptr) {
-        const int inverse    = ruleptr->rule_flags & RULE_INVERSE;
+        const bool inverse    = !!(ruleptr->rule_flags & RULE_INVERSE);
         const int pmatches   = inverse ? 0 : 10;
         const int matchsense = inverse ? REG_NOMATCH : 0;
-        int was_match;
+        bool was_match;
         const char *whatami;
         const struct rule *next = ruleptr->next;
 
@@ -704,7 +704,7 @@ char *rewrite_string(const struct formats *pf,
                 tftpd_log(LOG_INFO, "remap: line %u: ignoring %s (%s)",
                        ruleptr->line, whatami, accerr);
             }
-            was_match = 0;
+            was_match = false;
             if (newstr != current) {
                 xfree(newstr);
                 newstr = current;
