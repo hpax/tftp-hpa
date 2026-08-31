@@ -81,11 +81,9 @@ int pick_port_bind(int sockfd, union sock_addr *myaddr,
                    unsigned int port_range_to)
 {
     unsigned int port, firstport;
-    int port_range = 0;
+    bool port_range;
 
-    if (port_range_from != 0 && port_range_to != 0) {
-        port_range = 1;
-    }
+    port_range = port_range_from != 0 && port_range_to != 0;
 
     firstport = port_range
         ? port_range_from + rand() % (port_range_to - port_range_from + 1)
@@ -149,7 +147,7 @@ int set_sock_addr(char *host, union sock_addr *s, char **name, bool early)
 }
 
 #ifdef HAVE_IPV6
-int is_numeric_ipv6(const char *p)
+bool is_numeric_ipv6(const char *p)
 {
     /* A numeric IPv6 address consist at least of 2 ':' and
      * it may have sequences of hex-digits and maybe contain
@@ -159,14 +157,14 @@ int is_numeric_ipv6(const char *p)
      */
     int colon = 0;
     int dot = 0;
-    int bracket = 0;
+    bool bracket = false;
     char c;
 
     if (!p)
-        return 0;
+        return false;
 
     if (*p == '[') {
-	bracket = 1;
+	bracket = true;
 	p++;
     }
 
@@ -184,28 +182,28 @@ int is_numeric_ipv6(const char *p)
 	case 'a': case 'b': case 'c': case 'd': case 'e': case 'f':
 	    break;
 	default:
-	    return 0;		/* Invalid character */
+	    return false;		/* Invalid character */
 	}
     }
 
     if (colon < 2 || colon > 7)
-	return 0;
+	return false;
 
     if (dot) {
 	/* An IPv4-mapped address in dot-quad form will have 3 dots */
 	if (dot != 3)
-	    return 0;
+	    return false;
 	/* The IPv4-mapped address takes the space of one colon */
 	if (colon > 6)
-	    return 0;
+	    return false;
     }
 
     /* If bracketed, must be closed, and vice versa */
     if (bracket ^ (c == ']'))
-	return 0;
+	return false;
 
     /* Otherwise, assume we're okay */
-    return 1;
+    return true;
 }
 
 /* strip [] from numeric IPv6 addreses */

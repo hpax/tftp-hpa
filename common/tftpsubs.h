@@ -55,10 +55,10 @@ union sock_addr {
 #endif
 
 #ifdef HAVE_IPV6
-int is_numeric_ipv6(const char *);
+bool is_numeric_ipv6(const char *);
 char *strip_address(char *);
 #else
-#define is_numeric_ipv6(a)      0
+#define is_numeric_ipv6(a)      false
 #define strip_address(a)	(a)
 #endif
 

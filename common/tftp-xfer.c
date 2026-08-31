@@ -39,10 +39,10 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     volatile uint16_t block = 1;
     volatile uintmax_t bytes = 0;
     unsigned int packet_count;
-    int final;
+    bool final;
     int n;
     int size;
-    int restarted;
+    bool restarted;
     uint16_t opcode;
     uint16_t packet_block;
     uint16_t expected_ack;
@@ -79,7 +79,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
             block = next_block(block, xfer->rollover);
         }
 
-        restarted = sigsetjmp(retrybuf, 1);
+        restarted = !!sigsetjmp(retrybuf, 1);
         xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
       resend_window:
         for (n = 0; (unsigned int)n < packet_count; n++) {
@@ -166,13 +166,13 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     volatile uint16_t packet_block;
     volatile uintmax_t bytes = 0;
     volatile int packets_in_window = 0;
-    volatile int initial_reply_pending = initial_reply != NULL;
-    volatile int initial_packet_pending = initial_packet != NULL;
+    volatile bool initial_reply_pending = initial_reply != NULL;
+    volatile bool initial_packet_pending = initial_packet != NULL;
     int reply_len;
     int n;
     int size;
-    int final;
-    int restarted;
+    bool final;
+    bool restarted;
 
     result->last_block = 0;
     result->packet = NULL;
@@ -195,7 +195,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     }
 
     for (;;) {
-        restarted = sigsetjmp(retrybuf, 1);
+        restarted = !!sigsetjmp(retrybuf, 1);
         xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
         if (initial_reply_pending || restarted) {
             if (initial_reply_pending) {
@@ -216,7 +216,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
 
         if (initial_packet_pending) {
             n = initial_packet_len;
-            initial_packet_pending = 0;
+            initial_packet_pending = false;
             packet = initial_packet;
             opcode = ntohs(packet->th_opcode);
             packet_block = ntohs(packet->th_block);
@@ -254,7 +254,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             }
         }
 
-        initial_reply_pending = 0;
+        initial_reply_pending = false;
         if (n - 4 > (int)xfer->blocksize) {
             finish(xfer, result, TFTP_XFER_BAD_DATA, 0, bytes);
             return;

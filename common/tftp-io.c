@@ -44,18 +44,18 @@ struct tftp_io {
     unsigned int count;
     unsigned int held;
     int error;
-    int eof;
-    int stopped;
-    int threaded;
-    int newline;
+    bool eof;
+    bool stopped;
+    bool threaded;
+    bool newline;
     int prevchar;
-    int write_cr;
+    bool write_cr;
 #ifdef HAVE_PTHREAD
     pthread_t thread;
     pthread_mutex_t lock;
     pthread_cond_t changed;
-    int lock_initialized;
-    int cond_initialized;
+    bool lock_initialized;
+    bool cond_initialized;
 #endif
 };
 
@@ -99,7 +99,7 @@ static int netascii_read_packet(struct tftp_io *io, struct tftphdr *dp)
     for (i = 0; i < io->blocksize; i++) {
         if (io->newline) {
             c = io->prevchar == '\n' ? '\n' : '\0';
-            io->newline = 0;
+            io->newline = false;
         } else {
             c = getc(io->file);
             if (c == EOF) {
@@ -112,7 +112,7 @@ static int netascii_read_packet(struct tftp_io *io, struct tftphdr *dp)
             if (c == '\n' || c == '\r') {
                 io->prevchar = c;
                 c = '\r';
-                io->newline = 1;
+                io->newline = true;
             }
         }
         *p++ = c;
@@ -150,7 +150,7 @@ static int netascii_write_packet(struct tftp_io *io,
                 errno = EIO;
                 return -1;
             }
-            io->write_cr = 0;
+            io->write_cr = false;
             if (putc(c, io->file) == EOF) {
                 errno = EIO;
                 return -1;
@@ -158,7 +158,7 @@ static int netascii_write_packet(struct tftp_io *io,
             continue;
         }
         if (c == '\r') {
-            io->write_cr = 1;
+            io->write_cr = true;
             continue;
         }
         if (putc(c, io->file) == EOF) {
@@ -187,7 +187,7 @@ static int netascii_write_finish(struct tftp_io *io)
             errno = EIO;
             return -1;
         }
-        io->write_cr = 0;
+        io->write_cr = false;
     }
     errno = 0;
     if (fflush(io->file)) {
@@ -241,7 +241,7 @@ static void *reader_thread(void *arg)
         io->tail = io_next(io, io->tail);
         io->count++;
         if (length != (int)io->blocksize)
-            io->eof = 1;
+            io->eof = true;
         pthread_cond_broadcast(&io->changed);
         if (io->eof || io->stopped) {
             pthread_mutex_unlock(&io->lock);
@@ -291,9 +291,9 @@ static void *writer_thread(void *arg)
 }
 #endif
 
-static struct tftp_io *io_start(FILE *file, int convert, unsigned int slots,
+static struct tftp_io *io_start(FILE *file, bool convert, unsigned int slots,
                                 unsigned int window, unsigned int blocksize,
-                                enum io_direction direction, int threaded)
+                                enum io_direction direction, bool threaded)
 {
     struct tftp_io *io;
 #ifdef HAVE_PTHREAD
@@ -331,11 +331,11 @@ static struct tftp_io *io_start(FILE *file, int convert, unsigned int slots,
 
     error = pthread_mutex_init(&io->lock, NULL);
     if (!error)
-        io->lock_initialized = 1;
+        io->lock_initialized = true;
     if (!error)
         error = pthread_cond_init(&io->changed, NULL);
     if (!error)
-        io->cond_initialized = 1;
+        io->cond_initialized = true;
     if (!error)
         error = pthread_create(&io->thread, NULL,
                                direction == IO_READ ? reader_thread :
@@ -358,22 +358,22 @@ static struct tftp_io *io_start(FILE *file, int convert, unsigned int slots,
 #endif
 }
 
-struct tftp_io *tftp_io_reader_start(FILE *file, int convert,
+struct tftp_io *tftp_io_reader_start(FILE *file, bool convert,
                                      unsigned int window, unsigned int slots,
-                                     unsigned int blocksize, int threaded)
+                                     unsigned int blocksize, bool threaded)
 {
     return io_start(file, convert, slots, window, blocksize, IO_READ,
                     threaded);
 }
 
-struct tftp_io *tftp_io_writer_start(FILE *file, int convert,
+struct tftp_io *tftp_io_writer_start(FILE *file, bool convert,
                                      unsigned int slots, unsigned int blocksize,
-                                     int threaded)
+                                     bool threaded)
 {
     return io_start(file, convert, slots, 0, blocksize, IO_WRITE, threaded);
 }
 
-static int tftp_io_read_window(void *vctx, unsigned int *count, int *final)
+static int tftp_io_read_window(void *vctx, unsigned int *count, bool *final)
 {
     struct tftp_io *io = vctx;
     struct tftphdr *dp;
@@ -398,7 +398,7 @@ static int tftp_io_read_window(void *vctx, unsigned int *count, int *final)
             io->tail = io_next(io, io->tail);
             io->count++;
             if (length != (int)io->blocksize)
-                io->eof = 1;
+                io->eof = true;
         }
     }
     if (io->error) {
@@ -604,7 +604,7 @@ void tftp_io_stop(struct tftp_io *io)
 #ifdef HAVE_PTHREAD
     if (io->threaded) {
         pthread_mutex_lock(&io->lock);
-        io->stopped = 1;
+        io->stopped = true;
         pthread_cond_broadcast(&io->changed);
         pthread_mutex_unlock(&io->lock);
         (void)pthread_join(io->thread, NULL);

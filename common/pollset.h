@@ -49,7 +49,7 @@ static inline bool pollset_has(const struct pollset *set, int fd)
 
 #endif
 
-static inline int pollset_isempty(const struct pollset *set)
+static inline bool pollset_isempty(const struct pollset *set)
 {
     return set->nfds <= 0;
 }

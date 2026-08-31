@@ -41,7 +41,7 @@ struct tftp_xfer_ops {
     int (*recv)(void *, void *, int);
     void (*received)(void *, const struct tftphdr *, int);
     void (*drain)(void *);
-    void (*retry_enter)(void *, sigjmp_buf *, int);
+    void (*retry_enter)(void *, sigjmp_buf *, bool);
     void (*retry_leave)(void *);
     void (*wait_begin)(void *);
 };
@@ -56,7 +56,7 @@ struct tftp_xfer_ops {
  * provide room for a TFTP header and xfer->blocksize bytes of data.
  */
 struct tftp_xfer_io_ops {
-    int (*read_window)(void *, unsigned int *, int *);
+    int (*read_window)(void *, unsigned int *, bool *);
     struct tftphdr *(*read_packet)(void *, unsigned int);
     int (*read_length)(void *, unsigned int);
     void (*read_release)(void *);
@@ -70,7 +70,7 @@ struct tftp_xfer {
     unsigned int blocksize;
     unsigned int windowsize;
     uint16_t rollover;
-    int resend_oack;
+    bool resend_oack;
     void *control;
     int control_size;
     void *context;

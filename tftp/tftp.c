@@ -90,7 +90,7 @@ static void client_xfer_drain(void *vctx)
 }
 
 static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
-                                    int restarted)
+                                    bool restarted)
 {
     (void)vctx;
     active_timeoutbuf = retrybuf;

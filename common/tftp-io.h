@@ -11,10 +11,10 @@
 
 struct tftp_io;
 
-struct tftp_io *tftp_io_reader_start(FILE *, int, unsigned int,
-                                     unsigned int, unsigned int, int);
-struct tftp_io *tftp_io_writer_start(FILE *, int, unsigned int,
-                                     unsigned int, int);
+struct tftp_io *tftp_io_reader_start(FILE *, bool, unsigned int,
+                                     unsigned int, unsigned int, bool);
+struct tftp_io *tftp_io_writer_start(FILE *, bool, unsigned int,
+                                     unsigned int, bool);
 void tftp_io_stop(struct tftp_io *);
 
 extern const struct tftp_xfer_io_ops tftp_io_xfer_ops;
