@@ -196,13 +196,14 @@ Exit
 End-of-file will also exit.
 .TP
 \fBrexmt\fP \fIretransmission-timeout\fP
-Set the per-packet retransmission timeout, in seconds.
+Set the initial per-packet retransmission timeout, in seconds.  Each
+subsequent retry doubles this interval.
 .TP
 .B status
 Show current status.
 .TP
 \fBtimeout\fP \fItotal-transmission-timeout\fP
-Set the total transmission timeout, in seconds.
+Set the maximum retransmission interval, in seconds.
 .TP
 \fBwindowsize\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option with \fIwindow-size\fP

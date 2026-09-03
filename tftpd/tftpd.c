@@ -255,54 +255,14 @@ static int lock_file(int fd, bool lock_write)
 }
 
 
-/*
- * Receive packet with synchronous timeout; timeout is adjusted
- * to account for time spent waiting.
- */
 static int recv_time(int s, void *rbuf, int len, unsigned int flags,
                      unsigned long *timeout_us_p)
 {
-    struct timeval t0, t1;
-    int rv, err = errno;
-    intmax_t timeout_us = *timeout_us_p;
-    intmax_t timeout_left, dt;
-    struct pollset *set = pollset_add(NULL, s);
+    int rv = tftp_recv_time(s, rbuf, len, flags, NULL, NULL, timeout_us_p);
 
-    gettimeofday(&t0, NULL);
-    timeout_left = timeout_us;
+    if (rv < 0 && errno == ETIMEDOUT)
+        timer(0);               /* Should not return */
 
-    do {
-        do {
-            rv = pollset_poll(set, POLLSET_IN, timeout_left);
-            err = errno;
-
-            gettimeofday(&t1, NULL);
-
-            dt = (t1.tv_sec - t0.tv_sec) * (intmax_t)1000000 +
-		 (t1.tv_usec - t0.tv_usec);
-            *timeout_us_p = timeout_left =
-                (dt >= timeout_us) ? 1 : (timeout_us - dt);
-        } while (rv == -1 && err == EINTR);
-
-        if (rv == 0) {
-            timer(0);           /* Should not return */
-            rv = -1;
-            break;
-        }
-
-#ifdef MSG_DONTWAIT
-        rv = recv(s, rbuf, len, flags | MSG_DONTWAIT);
-        err = errno;
-#else
-        set_socket_nonblock(s, true);
-        rv = recv(s, rbuf, len, flags);
-        err = errno;
-        set_socket_nonblock(s, false);
-#endif
-    } while (rv < 0 && (E_WOULD_BLOCK(err) || err == EINTR));
-
-    pollset_free(&set);
-    errno = err;
     return rv;
 }
 

@@ -32,8 +32,9 @@ extern unsigned int windowsize;
  * packets.  It needs to accommodate requests containing RFC 2347 options.
  */
 #define REQBUFSIZE MAX_SEGSIZE+4
+#define USEC_PER_SEC 1000000UL
 static char ackbuf[REQBUFSIZE];
-static int timeout;
+static unsigned long timeout;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 
@@ -50,7 +51,23 @@ static void tpacket(const char *, const struct tftphdr *, int);
 
 struct client_xfer_context {
     union sock_addr from;
+    unsigned long timeout;
 };
+
+static int client_recv_time(void *packet, int length, union sock_addr *from,
+                            unsigned long *timeout_us_p)
+{
+    socklen_t fromlen = sizeof(*from);
+    int n;
+
+    n = tftp_recv_time(f, packet, length, 0, &from->sa, &fromlen,
+                       timeout_us_p);
+    if (n < 0 && errno == ETIMEDOUT)
+        timer(0);               /* Should not return */
+    if (n >= 0)
+        sa_set_port(&peeraddr, SOCKPORT(from));
+    return n;
+}
 
 static int client_xfer_send(void *vctx, const void *packet, int length)
 {
@@ -64,15 +81,8 @@ static int client_xfer_send(void *vctx, const void *packet, int length)
 static int client_xfer_recv(void *vctx, void *packet, int length)
 {
     struct client_xfer_context *ctx = vctx;
-    socklen_t fromlen = sizeof(ctx->from);
-    int n;
 
-    alarm(rexmtval);
-    n = recvfrom(f, packet, length, 0, &ctx->from.sa, &fromlen);
-    alarm(0);
-    if (n >= 0)
-        sa_set_port(&peeraddr, SOCKPORT(&ctx->from));
-    return n;
+    return client_recv_time(packet, length, &ctx->from, &ctx->timeout);
 }
 
 static void client_xfer_received(void *vctx, const struct tftphdr *packet,
@@ -89,7 +99,7 @@ static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
     (void)vctx;
     active_timeoutbuf = retrybuf;
     if (!restarted)
-        timeout = 0;
+        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
 }
 
 static void client_xfer_retry_leave(void *vctx)
@@ -100,7 +110,9 @@ static void client_xfer_retry_leave(void *vctx)
 
 static void client_xfer_wait_begin(void *vctx)
 {
-    (void)vctx;
+    struct client_xfer_context *ctx = vctx;
+
+    ctx->timeout = timeout;
 }
 
 static const struct tftp_xfer_ops client_xfer_ops = {
@@ -122,7 +134,6 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     char response[REQBUFSIZE];
     const struct tftphdr *rp = (const struct tftphdr *)response;
     union sock_addr from;
-    socklen_t fromlen;
     FILE *file = NULL;
     struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
@@ -134,6 +145,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     unsigned int negotiated_block, negotiated_window;
     bool requested_options = blocksize != SEGSIZE || requested_window;
     uint16_t ap_opcode, ap_block;
+    unsigned long r_timeout;
     volatile uintmax_t amount = 0;
 
     startclock();
@@ -152,7 +164,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
 
     /* A peer which ignores options answers a WRQ with ACK 0. */
     for (;;) {
-        timeout = 0;
+        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
         (void)sigsetjmp(timeoutbuf, 1);
         if (trace)
             tpacket("sent", ap, size);
@@ -160,17 +172,15 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             perror("tftp: sendto");
             goto abort;
         }
-        alarm(rexmtval);
-        fromlen = sizeof(from);
-        n = recvfrom(f, response, sizeof(response), 0, &from.sa, &fromlen);
-        alarm(0);
+        r_timeout = timeout;
+      wait_for_reply:
+        n = client_recv_time(response, sizeof(response), &from, &r_timeout);
         if (n < 0) {
             perror("tftp: recvfrom");
             goto abort;
         }
-        sa_set_port(&peeraddr, SOCKPORT(&from));
         if (n < 2)
-            continue;
+            goto wait_for_reply;
         if (trace)
             tpacket("received", rp, n);
         ap_opcode = ntohs(rp->th_opcode);
@@ -196,6 +206,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
             window = 1;         /* Traditional server ignored options. */
             break;
         }
+        goto wait_for_reply;
     }
 
     io = tftp_io_reader_start(file, convert, window, window, segsize, false);
@@ -254,7 +265,6 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
 {
     struct tftphdr *ap;
     union sock_addr from;
-    socklen_t fromlen;
     FILE *file = NULL;
     struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
@@ -270,6 +280,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     unsigned int negotiated_block, negotiated_window;
     bool requested_options = blocksize != SEGSIZE || requested_window;
     uint16_t opcode;
+    unsigned long r_timeout;
     volatile uintmax_t amount = 0;
 
     startclock();
@@ -288,7 +299,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
 
     /* RFC 7440 peers answer with OACK; legacy peers start with DATA 1. */
     for (;;) {
-        timeout = 0;
+        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
         (void)sigsetjmp(timeoutbuf, 1);
         if (trace)
             tpacket("sent", ap, size);
@@ -296,18 +307,16 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             perror("tftp: sendto");
             goto abort;
         }
-        alarm(rexmtval);
-        fromlen = sizeof(from);
-        n = recvfrom(f, initial_packet, TFTP_XFER_MAX_PACKET_SIZE, 0,
-                     &from.sa, &fromlen);
-        alarm(0);
+        r_timeout = timeout;
+      wait_for_reply:
+        n = client_recv_time(initial_packet, TFTP_XFER_MAX_PACKET_SIZE,
+                             &from, &r_timeout);
         if (n < 0) {
             perror("tftp: recvfrom");
             goto abort;
         }
-        sa_set_port(&peeraddr, SOCKPORT(&from));
         if (n < 2)
-            continue;
+            goto wait_for_reply;
         opcode = ntohs(initial_packet->th_opcode);
         if (trace)
             tpacket("received", initial_packet, n);
@@ -337,7 +346,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
             initial_packet_len = n;
             break;
         } else {
-            continue;
+            goto wait_for_reply;
         }
         break;
     }
@@ -700,8 +709,8 @@ static void timer(int sig)
 
     (void)sig;                  /* Shut up unused warning */
 
-    timeout += rexmtval;
-    if (timeout >= maxtimeout) {
+    timeout <<= 1;
+    if (timeout >= (unsigned long)maxtimeout * USEC_PER_SEC) {
         printf("Transfer timed out.\n");
         errno = save_errno;
         siglongjmp(toplevel, -1);

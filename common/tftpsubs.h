@@ -81,6 +81,8 @@ static inline int sa_set_port(union sock_addr *s, uint16_t port)
 
 int set_sock_addr(char *, union sock_addr *, char **, bool);
 void tftp_set_socket_buffers(int, unsigned int, unsigned int, bool);
+int tftp_recv_time(int, void *, int, unsigned int, struct sockaddr *,
+                   socklen_t *, unsigned long *);
 
 /*
  * Wrapper for setsockopt() for the case where the option is an int.

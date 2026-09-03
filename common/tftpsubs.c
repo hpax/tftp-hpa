@@ -6,6 +6,7 @@
  */
 
 #include "tftpsubs.h"
+#include "pollset.h"
 
 int segsize = SEGSIZE;          /* Default segsize */
 
@@ -39,6 +40,90 @@ void tftp_set_socket_buffers(int fd, unsigned int blocksize,
     (void)windowsize;
     (void)is_send;
 #endif
+}
+
+#ifndef MSG_DONTWAIT
+static int set_socket_nonblock(int fd, bool flag)
+{
+    int socket_flags;
+
+#if defined(HAVE_FCNTL) && (O_NONBLOCK != 0)
+    socket_flags = fcntl(fd, F_GETFL, 0);
+    if (socket_flags < 0)
+        return -1;
+
+    if (flag)
+        socket_flags |= O_NONBLOCK;
+    else
+        socket_flags &= ~O_NONBLOCK;
+
+    return fcntl(fd, F_SETFL, socket_flags);
+#else
+    socket_flags = flag ? 1 : 0;
+    return ioctl(fd, FIONBIO, &socket_flags);
+#endif
+}
+#endif
+
+/*
+ * Receive a packet with a synchronous timeout.  The remaining timeout is
+ * updated after interrupted polls and discarded packets so a receive attempt
+ * cannot extend its deadline.
+ */
+int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
+                   struct sockaddr *from, socklen_t *fromlen,
+                   unsigned long *timeout_us_p)
+{
+    struct timeval t0, t1;
+    int rv, err = errno;
+    intmax_t timeout_us = *timeout_us_p;
+    intmax_t timeout_left, dt;
+    struct pollset *set = pollset_add(NULL, s);
+
+    gettimeofday(&t0, NULL);
+    timeout_left = timeout_us;
+
+    do {
+        do {
+            rv = pollset_poll(set, POLLSET_IN, timeout_left);
+            err = errno;
+
+            gettimeofday(&t1, NULL);
+
+            dt = (t1.tv_sec - t0.tv_sec) * (intmax_t)1000000 +
+                 (t1.tv_usec - t0.tv_usec);
+            *timeout_us_p = timeout_left =
+                (dt >= timeout_us) ? 1 : (timeout_us - dt);
+        } while (rv == -1 && err == EINTR);
+
+        if (rv == 0) {
+            err = ETIMEDOUT;
+            rv = -1;
+            break;
+        }
+
+#ifdef MSG_DONTWAIT
+        rv = recvfrom(s, rbuf, len, flags | MSG_DONTWAIT, from, fromlen);
+        err = errno;
+#else
+        if (set_socket_nonblock(s, true) < 0) {
+            err = errno;
+            rv = -1;
+            break;
+        }
+        rv = recvfrom(s, rbuf, len, flags, from, fromlen);
+        err = errno;
+        if (set_socket_nonblock(s, false) < 0 && rv >= 0) {
+            err = errno;
+            rv = -1;
+        }
+#endif
+    } while (rv < 0 && (E_WOULD_BLOCK(err) || err == EINTR));
+
+    pollset_free(&set);
+    if (rv < 0)
+        errno = err;
+    return rv;
 }
 
 int pick_port_bind(int sockfd, union sock_addr *myaddr,

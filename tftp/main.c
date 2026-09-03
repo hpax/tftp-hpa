@@ -23,7 +23,9 @@
 
 #include "extern.h"
 
-#define	TIMEOUT		5       /* secs between rexmt's */
+#define	TIMEOUT		1       /* secs between rexmt's */
+#define TRIES		6       /* Number of attempts to send each packet */
+#define TIMEOUT_LIMIT	((1 << TRIES)-1)
 #define	LBUFLEN		200     /* size of input buffer */
 
 /* In theory up to 65535 is supported, but limit it for safety */
@@ -786,6 +788,7 @@ static void getusage(const char *s)
 }
 
 int rexmtval = TIMEOUT;
+int maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
 
 static void setrexmt(int argc, char *argv[])
 {
@@ -801,13 +804,13 @@ static void setrexmt(int argc, char *argv[])
         return;
     }
     t = atoi(argv[1]);
-    if (t < 0)
+    if (t < 1)
         printf("%s: bad value\n", argv[1]);
-    else
+    else {
         rexmtval = t;
+        maxtimeout = rexmtval * TIMEOUT_LIMIT;
+    }
 }
-
-int maxtimeout = 5 * TIMEOUT;
 
 static void settimeout(int argc, char *argv[])
 {
@@ -823,7 +826,7 @@ static void settimeout(int argc, char *argv[])
         return;
     }
     t = atoi(argv[1]);
-    if (t < 0)
+    if (t < 1)
         printf("%s: bad value\n", argv[1]);
     else
         maxtimeout = t;
