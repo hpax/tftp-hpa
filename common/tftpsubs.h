@@ -91,10 +91,6 @@ static inline int setsockint(int sockfd, int level, int optname,
     return setsockopt(sockfd, level, optname, &optval, sizeof(optval));
 }
 
-struct tftphdr;
-
-int synchnet(int);
-
 extern int segsize;
 #define MAX_SEGSIZE	65464
 

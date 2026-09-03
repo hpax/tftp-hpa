@@ -6,9 +6,6 @@
  */
 
 #include "tftpsubs.h"
-#include "pollset.h"
-
-#define PKTSIZE MAX_SEGSIZE+4
 
 int segsize = SEGSIZE;          /* Default segsize */
 
@@ -42,38 +39,6 @@ void tftp_set_socket_buffers(int fd, unsigned int blocksize,
     (void)windowsize;
     (void)is_send;
 #endif
-}
-
-/* When an error has occurred, it is possible that the two sides
- * are out of synch.  Ie: that what I think is the other side's
- * response to packet N is really their response to packet N-1.
- *
- * So, to try to prevent that, we flush all the input queued up
- * for us on the network connection on our host.
- *
- * We return the number of packets we flushed (mostly for reporting
- * when trace is active).
- */
-
-int synchnet(int f)
-{                               /* socket to flush */
-    int pktcount = 0;
-    char rbuf[PKTSIZE];
-    union sock_addr from;
-    socklen_t fromlen;
-    struct pollset *set = pollset_add(NULL, f);
-
-    while (pollset_poll(set, POLLSET_IN, 0) > 0) {
-        /* Otherwise drain the packet */
-        pktcount++;
-        fromlen = sizeof(from);
-        if (recvfrom(f, rbuf, sizeof(rbuf), 0, &from.sa, &fromlen) < 0)
-            break;
-    }
-
-    pollset_free(&set);
-
-    return pktcount;            /* Return packets drained */
 }
 
 int pick_port_bind(int sockfd, union sock_addr *myaddr,

@@ -42,6 +42,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     bool final;
     int n;
     int size;
+    int resend_start;
     bool restarted;
     uint16_t opcode;
     uint16_t packet_block;
@@ -81,8 +82,9 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
 
         restarted = !!sigsetjmp(retrybuf, 1);
         xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
+        resend_start = 0;
       resend_window:
-        for (n = 0; (unsigned int)n < packet_count; n++) {
+        for (n = resend_start; (unsigned int)n < packet_count; n++) {
             dp = xfer->io_ops->read_packet(xfer->io_context,
                                             (unsigned int)n);
             size = xfer->io_ops->read_length(xfer->io_context,
@@ -133,10 +135,31 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
             expected_ack = ntohs(dp->th_block);
             if (opcode == ACK && packet_block == expected_ack)
                 break;
-            if (opcode == OACK && xfer->resend_oack)
+            if (opcode == OACK && xfer->resend_oack) {
+                resend_start = 0;
                 goto resend_window;
-            if (opcode == ACK)
-                xfer->ops->drain(xfer->context);
+            }
+            if (opcode == ACK) {
+                /*
+                 * An ACK within this window cumulatively confirms its
+                 * prefix.  Retransmit only the remaining suffix.
+                 */
+                for (n = 0; (unsigned int)n + 1 < packet_count; n++) {
+                    dp = xfer->io_ops->read_packet(xfer->io_context,
+                                                    (unsigned int)n);
+                    if (!dp) {
+                        if (!errno)
+                            errno = EIO;
+                        finish(xfer, result, TFTP_XFER_READ_ERROR, errno,
+                               bytes);
+                        return;
+                    }
+                    if (packet_block == ntohs(dp->th_block)) {
+                        resend_start = n + 1;
+                        goto resend_window;
+                    }
+                }
+            }
         }
         for (n = 0; (unsigned int)n < packet_count; n++) {
             bytes += xfer->io_ops->read_length(xfer->io_context,
@@ -161,6 +184,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     const struct tftphdr *packet;
     sigjmp_buf retrybuf;
     volatile uint16_t block = 1;
+    volatile uint16_t last_received = 0;
     volatile uint16_t last_acked = 0;
     uint16_t opcode;
     volatile uint16_t packet_block;
@@ -246,11 +270,13 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                     continue;
                 if (packet_block == block)
                     break;
-                if (packet_block == last_acked) {
-                    ack->th_opcode = htons((uint16_t)ACK);
-                    ack->th_block = htons(last_acked);
-                    (void)xfer->ops->send(xfer->context, ack, 4);
-                }
+                /*
+                 * RFC 7440 recovery is driven by the last contiguous
+                 * block, including when it falls within the current window.
+                 */
+                ack->th_opcode = htons((uint16_t)ACK);
+                ack->th_block = htons(last_received);
+                (void)xfer->ops->send(xfer->context, ack, 4);
             }
         }
 
@@ -270,6 +296,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         bytes += size;
         final = size != (int)xfer->blocksize;
         packets_in_window++;
+        last_received = packet_block;
         block = next_block(block, xfer->rollover);
         if (final || packets_in_window == (int)xfer->windowsize) {
             last_acked = packet_block;

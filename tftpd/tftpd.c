@@ -331,12 +331,6 @@ static void daemon_xfer_received(void *vctx, const struct tftphdr *packet,
     (void)length;
 }
 
-static void daemon_xfer_drain(void *vctx)
-{
-    (void)vctx;
-    (void)synchnet(peer);
-}
-
 static void daemon_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
                                     bool restarted)
 {
@@ -377,7 +371,6 @@ static const struct tftp_xfer_ops daemon_xfer_ops = {
     daemon_xfer_send,
     daemon_xfer_recv,
     daemon_xfer_received,
-    daemon_xfer_drain,
     daemon_xfer_retry_enter,
     daemon_xfer_retry_leave,
     daemon_xfer_wait_begin
@@ -1801,8 +1794,6 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
             if (ap_opcode == ACK) {
                 if (ap_block == 0)
                     break;
-                /* Resynchronize with the other side */
-                (void)synchnet(peer);
                 goto oack;
             }
         }

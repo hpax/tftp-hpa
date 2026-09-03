@@ -83,12 +83,6 @@ static void client_xfer_received(void *vctx, const struct tftphdr *packet,
         tpacket("received", packet, length);
 }
 
-static void client_xfer_drain(void *vctx)
-{
-    (void)vctx;
-    (void)synchnet(f);
-}
-
 static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
                                     bool restarted)
 {
@@ -113,7 +107,6 @@ static const struct tftp_xfer_ops client_xfer_ops = {
     client_xfer_send,
     client_xfer_recv,
     client_xfer_received,
-    client_xfer_drain,
     client_xfer_retry_enter,
     client_xfer_retry_leave,
     client_xfer_wait_begin

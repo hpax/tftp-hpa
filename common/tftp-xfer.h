@@ -40,7 +40,6 @@ struct tftp_xfer_ops {
     int (*send)(void *, const void *, int);
     int (*recv)(void *, void *, int);
     void (*received)(void *, const struct tftphdr *, int);
-    void (*drain)(void *);
     void (*retry_enter)(void *, sigjmp_buf *, bool);
     void (*retry_leave)(void *);
     void (*wait_begin)(void *);
