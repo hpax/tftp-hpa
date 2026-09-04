@@ -1,3 +1,28 @@
+Changes in 6.1:
+	The client and server now use a shared transfer implementation,
+	improving consistency for block/window handling, retransmission,
+	option negotiation, rollover, and netascii/octet transfers.
+
+	Improve windowed-transfer recovery.  Delayed, duplicate, and
+	out-of-order packets are processed instead of flushing the receive
+	queue, avoiding loss of valid acknowledgements.
+
+	The client now uses the daemon's exponential retransmission timeout
+	behavior, with a one-second initial timeout and six retry attempts.
+
+	Fix netascii transfers when a CR sequence spans a data-packet or
+	window boundary.
+
+	Client transfer statistics now report correct elapsed time and use
+	human-friendly byte and bit-rate units; use verbosity level 2 for
+	unscaled values.
+
+	tftpd's threaded transfer I/O is now optional.  Configure with
+	--disable-threads for a build without pthread support.
+
+	Update project URLs to HTTPS and direct bug reports to GitHub.
+
+
 Changes in 6.0:
 	*** IMPORTANT: See note about tcpwrappers below ***
 
