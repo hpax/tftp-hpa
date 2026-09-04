@@ -30,6 +30,41 @@ static uint16_t next_block(uint16_t block, uint16_t rollover)
     return block;
 }
 
+static uintmax_t time_us(void)
+{
+    struct timeval now;
+
+    gettimeofday(&now, NULL);
+    return (uintmax_t)now.tv_sec * 1000000 + now.tv_usec;
+}
+
+static unsigned long update_round_trip_time(unsigned long round_trip_time,
+                                            uintmax_t sample)
+{
+    uintmax_t average;
+
+    average = (uintmax_t)round_trip_time * FAST_ACK_MEMORY +
+        sample * (FAST_ACK_MEMORY_SCALE - FAST_ACK_MEMORY);
+    average /= FAST_ACK_MEMORY_SCALE;
+    return average > ULONG_MAX ? ULONG_MAX : (unsigned long)average;
+}
+
+unsigned long tftp_fast_ack_timeout(unsigned long round_trip_time,
+                                    unsigned long default_timeout)
+{
+    unsigned long threshold;
+    unsigned long fast_timeout;
+
+    threshold = default_timeout / (FAST_ACK_MAX * FAST_ACK_TIME);
+    if (round_trip_time >= threshold)
+        return 0;
+
+    fast_timeout = round_trip_time * FAST_ACK_TIME;
+    if (fast_timeout < default_timeout / FAST_ACK_MIN)
+        fast_timeout = default_timeout / FAST_ACK_MIN;
+    return fast_timeout;
+}
+
 void tftp_xfer_send(const struct tftp_xfer *xfer,
                     struct tftp_xfer_result *result)
 {
@@ -44,12 +79,15 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     int size;
     int resend_start;
     bool restarted;
+    volatile unsigned long round_trip_time;
+    volatile uintmax_t burst_started;
     uint16_t opcode;
     uint16_t packet_block;
     uint16_t expected_ack;
 
     result->last_block = 0;
     result->packet = NULL;
+    round_trip_time = xfer->default_timeout;
     if (!xfer->io_ops) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_READ_ERROR, errno, 0);
@@ -84,6 +122,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
         xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
         resend_start = 0;
       resend_window:
+        burst_started = time_us();
         for (n = resend_start; (unsigned int)n < packet_count; n++) {
             dp = xfer->io_ops->read_packet(xfer->io_context,
                                             (unsigned int)n);
@@ -103,7 +142,8 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
             }
         }
 
-        xfer->ops->wait_begin(xfer->context);
+        xfer->ops->wait_begin(xfer->context, round_trip_time,
+                              xfer->default_timeout);
         for (;;) {
             n = xfer->ops->recv(xfer->context, xfer->control,
                                 xfer->control_size);
@@ -133,8 +173,14 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
                 return;
             }
             expected_ack = ntohs(dp->th_block);
-            if (opcode == ACK && packet_block == expected_ack)
+            if (opcode == ACK && packet_block == expected_ack) {
+                uintmax_t now = time_us();
+
+                if (now >= burst_started)
+                    round_trip_time = update_round_trip_time(
+                        round_trip_time, now - burst_started);
                 break;
+            }
             if (opcode == OACK && xfer->resend_oack) {
                 resend_start = 0;
                 goto resend_window;
@@ -192,6 +238,9 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     volatile int packets_in_window = 0;
     volatile bool initial_reply_pending = initial_reply != NULL;
     volatile bool initial_packet_pending = initial_packet != NULL;
+    volatile bool wait_started = false;
+    volatile unsigned long round_trip_time;
+    volatile uintmax_t ack_sent;
     int reply_len;
     int n;
     int size;
@@ -200,6 +249,8 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
 
     result->last_block = 0;
     result->packet = NULL;
+    round_trip_time = xfer->default_timeout;
+    ack_sent = 0;
     if (!xfer->io_ops || !xfer->io_ops->write_finish) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
@@ -236,6 +287,10 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                        bytes);
                 return;
             }
+            ack_sent = time_us();
+            xfer->ops->wait_begin(xfer->context, round_trip_time,
+                                  xfer->default_timeout);
+            wait_started = true;
         }
 
         if (initial_packet_pending) {
@@ -245,7 +300,6 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             opcode = ntohs(packet->th_opcode);
             packet_block = ntohs(packet->th_block);
         } else {
-            xfer->ops->wait_begin(xfer->context);
             for (;;) {
                 n = xfer->ops->recv(xfer->context, input,
                                     TFTP_XFER_MAX_PACKET_SIZE);
@@ -299,6 +353,11 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         last_received = packet_block;
         block = next_block(block, xfer->rollover);
         if (final || packets_in_window == (int)xfer->windowsize) {
+            uintmax_t now = time_us();
+
+            if (wait_started && now >= ack_sent)
+                round_trip_time = update_round_trip_time(round_trip_time,
+                                                          now - ack_sent);
             last_acked = packet_block;
             packets_in_window = 0;
             ack->th_opcode = htons((uint16_t)ACK);
@@ -323,6 +382,10 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                        bytes);
                 return;
             }
+            ack_sent = time_us();
+            xfer->ops->wait_begin(xfer->context, round_trip_time,
+                                  xfer->default_timeout);
+            wait_started = true;
             if (final) {
                 result->last_block = last_acked;
                 finish(xfer, result, TFTP_XFER_OK, 0, bytes);

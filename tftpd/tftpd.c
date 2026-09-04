@@ -268,6 +268,8 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
 
 struct daemon_xfer_context {
     unsigned long timeout;
+    bool fast_timeout;
+    bool fast_retry_used;
 };
 
 static int daemon_xfer_send(void *vctx, const void *packet, int length)
@@ -279,8 +281,17 @@ static int daemon_xfer_send(void *vctx, const void *packet, int length)
 static int daemon_xfer_recv(void *vctx, void *packet, int length)
 {
     struct daemon_xfer_context *ctx = vctx;
+    int rv;
 
-    return recv_time(peer, packet, length, 0, &ctx->timeout);
+    rv = tftp_recv_time(peer, packet, length, 0, NULL, NULL, &ctx->timeout);
+    if (rv < 0 && errno == ETIMEDOUT) {
+        if (ctx->fast_timeout) {
+            ctx->fast_timeout = false;
+            siglongjmp(*active_timeoutbuf, 1);
+        }
+        timer(0);               /* Should not return */
+    }
+    return rv;
 }
 
 static void daemon_xfer_received(void *vctx, const struct tftphdr *packet,
@@ -294,10 +305,16 @@ static void daemon_xfer_received(void *vctx, const struct tftphdr *packet,
 static void daemon_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
                                     bool restarted)
 {
-    (void)vctx;
+    struct daemon_xfer_context *ctx = vctx;
+
     active_timeoutbuf = retrybuf;
-    if (!restarted)
+    if (!restarted) {
         timeout = rexmtval;
+        ctx->fast_retry_used = false;
+    } else {
+        ctx->fast_retry_used = true;
+    }
+    ctx->fast_timeout = false;
 }
 
 static void daemon_xfer_retry_leave(void *vctx)
@@ -306,11 +323,22 @@ static void daemon_xfer_retry_leave(void *vctx)
     active_timeoutbuf = &timeoutbuf;
 }
 
-static void daemon_xfer_wait_begin(void *vctx)
+static void daemon_xfer_wait_begin(void *vctx, unsigned long round_trip_time,
+                                   unsigned long default_timeout)
 {
     struct daemon_xfer_context *ctx = vctx;
+    unsigned long fast_timeout;
 
     ctx->timeout = timeout;
+    ctx->fast_timeout = false;
+    if (!ctx->fast_retry_used) {
+        fast_timeout = tftp_fast_ack_timeout(round_trip_time,
+                                             default_timeout);
+        if (fast_timeout) {
+            ctx->timeout = fast_timeout;
+            ctx->fast_timeout = true;
+        }
+    }
 }
 
 static void daemon_xfer_dally(uint16_t last_acked)
@@ -1768,6 +1796,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
 
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
+    xfer.default_timeout = rexmtval;
     xfer.rollover = rollover_val;
     xfer.resend_oack = true;
     xfer.control = ackbuf;
@@ -1835,6 +1864,7 @@ static void tftp_recvfile(const struct formats *pf,
 
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
+    xfer.default_timeout = rexmtval;
     xfer.rollover = rollover_val;
     xfer.resend_oack = false;
     xfer.control = ackbuf;

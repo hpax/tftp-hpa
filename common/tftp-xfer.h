@@ -11,6 +11,23 @@
 
 #define TFTP_XFER_MAX_PACKET_SIZE (MAX_SEGSIZE + 4)
 
+/*
+ * FAST_ACK_MEMORY is the numerator of the old-sample weight; the
+ * denominator makes recent samples contribute the remaining weight.
+ */
+#define FAST_ACK_MEMORY		3
+#define FAST_ACK_MEMORY_SCALE		4
+#define FAST_ACK_TIME			4
+#define FAST_ACK_MIN			8
+#define FAST_ACK_MAX			2
+
+#if FAST_ACK_MEMORY > FAST_ACK_MEMORY_SCALE
+# error FAST_ACK_MEMORY must not exceed FAST_ACK_MEMORY_SCALE
+#endif
+#if FAST_ACK_TIME < 1 || FAST_ACK_MIN < 1 || FAST_ACK_MAX < 1
+# error FAST_ACK_TIME, FAST_ACK_MIN, and FAST_ACK_MAX must be positive
+#endif
+
 enum tftp_xfer_status {
     TFTP_XFER_OK,
     TFTP_XFER_SEND_ERROR,
@@ -42,7 +59,7 @@ struct tftp_xfer_ops {
     void (*received)(void *, const struct tftphdr *, int);
     void (*retry_enter)(void *, sigjmp_buf *, bool);
     void (*retry_leave)(void *);
-    void (*wait_begin)(void *);
+    void (*wait_begin)(void *, unsigned long, unsigned long);
 };
 
 /*
@@ -68,6 +85,7 @@ struct tftp_xfer_io_ops {
 struct tftp_xfer {
     unsigned int blocksize;
     unsigned int windowsize;
+    unsigned long default_timeout;
     uint16_t rollover;
     bool resend_oack;
     void *control;
@@ -98,5 +116,7 @@ void tftp_xfer_recv(const struct tftp_xfer *, struct tftphdr *ack,
                     const struct tftphdr *initial_reply,
                     int initial_reply_len, struct tftphdr *initial_packet,
                     int initial_packet_len, struct tftp_xfer_result *);
+
+unsigned long tftp_fast_ack_timeout(unsigned long, unsigned long);
 
 #endif /* TFTP_XFER_H */
