@@ -393,6 +393,11 @@ const char *inet_ntop(int, const void *, char *, socklen_t);
 # define WITH_IPV6 0
 #endif
 
+/* Handy macros */
+
+#define ARRAY_SIZE(x)  (sizeof(x)/sizeof(x[0]))
+#define ARRAY_END(x)   (&(x)[ARRAY_SIZE(x)])
+
 /* tftp-hpa version and configuration strings */
 
 #include "version.h"

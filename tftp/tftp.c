@@ -8,6 +8,7 @@
 #include "common/tftpsubs.h"
 #include "common/tftp-io.h"
 #include "common/tftp-xfer.h"
+#include "common/clock.h"
 
 /*
  * TFTP User Program -- Protocol Machines
@@ -627,18 +628,16 @@ static void tpacket(const char *s, const struct tftphdr *tp, int n)
     }
 }
 
-static struct timeval tstart;
-static struct timeval tstop;
+static uintmax_t tstart, tstop;
 
-static void startclock(void)
+static inline void startclock(void)
 {
-    (void)gettimeofday(&tstart, NULL);
+    tstart = clock_us();
 }
 
-static void stopclock(void)
+static inline void stopclock(void)
 {
-
-    (void)gettimeofday(&tstop, NULL);
+    tstop = clock_us();
 }
 
 #define PWS_BINARY 1
@@ -680,8 +679,7 @@ static bool print_with_suffix(double val, unsigned int flags)
 static void printstats(const char *direction, uintmax_t amount)
 {
     if (verbose) {
-        double delta = (tstop.tv_sec - tstart.tv_sec) +
-            ((int32_t)tstop.tv_usec - (int32_t)tstart.tv_usec) * 1.0e-6;
+        double delta = (tstop - tstart) * 1.0e-6;
         bool with_suffix;
 
         fputs(direction, stdout);

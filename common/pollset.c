@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "pollset.h"
+#include "clock.h"
 #include "tftpsubs.h"           /* For xcalloc()/xfree() */
 
 static sigjmp_buf pollset_sigjmpbuf;
@@ -184,11 +185,9 @@ int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
     {
         struct timespec ts, *tsp = NULL;
 
-        if (utimeout >= 0) {
-            ts.tv_sec  =  utimeout / 1000000;
-            ts.tv_nsec = (utimeout % 1000000) * 1000;
-            tsp = &ts;
-        }
+        if (utimeout >= 0)
+            tsp = us_to_timespec(utimeout, &ts);
+
         rv = ppoll(set->fds, set->nfds, tsp, NULL);
     }
 #else
@@ -196,7 +195,7 @@ int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
         int timeout = -1;
 
         if (utimeout >= 0) {
-            utimeout = (utimeout + 999)/1000;
+            utimeout = (utimeout + MSEC_PER_USEC-1)/MSEC_PER_USEC;
             timeout = (utimeout > INT_MAX) ? INT_MAX : utimeout;
         }
 
@@ -323,12 +322,8 @@ int pollset_poll(struct pollset *set, int what, intmax_t utimeout)
 
     {
         struct timeval tv, *tvp = NULL;
-
-        if (utimeout >= 0) {
-            tv.tv_sec  = utimeout / 1000000;
-            tv.tv_usec = utimeout % 1000000;
-            tvp = &tv;
-        }
+        if (utimeout >= 0)
+            tvp = usec_to_timeval(utimeout, &tv);
 
         rv = select(set->nfds, sets[0], sets[1], sets[2], tvp);
     }

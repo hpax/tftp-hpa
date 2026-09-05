@@ -7,6 +7,7 @@
 
 #include "tftpsubs.h"
 #include "pollset.h"
+#include "clock.h"
 
 int segsize = SEGSIZE;          /* Default segsize */
 
@@ -74,13 +75,13 @@ int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
                    struct sockaddr *from, socklen_t *fromlen,
                    unsigned long *timeout_us_p)
 {
-    struct timeval t0, t1;
+    uintmax_t t0, dt;
     int rv, err = errno;
-    intmax_t timeout_us = *timeout_us_p;
-    intmax_t timeout_left, dt;
+    uintmax_t timeout_us = *timeout_us_p;
+    uintmax_t timeout_left;
     struct pollset *set = pollset_add(NULL, s);
 
-    gettimeofday(&t0, NULL);
+    t0 = clock_us();
     timeout_left = timeout_us;
 
     do {
@@ -88,10 +89,8 @@ int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
             rv = pollset_poll(set, POLLSET_IN, timeout_left);
             err = errno;
 
-            gettimeofday(&t1, NULL);
+            dt = clock_us() - t0;
 
-            dt = (t1.tv_sec - t0.tv_sec) * (intmax_t)1000000 +
-                 (t1.tv_usec - t0.tv_usec);
             *timeout_us_p = timeout_left =
                 (dt >= timeout_us) ? 1 : (timeout_us - dt);
         } while (rv == -1 && err == EINTR);
