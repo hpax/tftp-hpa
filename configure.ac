@@ -142,6 +142,14 @@ dnl Solaris 8 has [u]intmax_t but not strtoumax().  How utterly braindamaged.
 AC_CHECK_FUNCS(strtoumax)
 AC_CHECK_FUNCS(strtoull)
 
+AC_CHECK_FUNCS(fread_unlocked)
+AC_CHECK_FUNCS(fwrite_unlocked)
+AC_CHECK_FUNCS(getc_unlocked)
+AC_CHECK_FUNCS(putc_unlocked)
+AC_CHECK_FUNCS(ferror_unlocked)
+AC_CHECK_FUNCS(feof_unlocked)
+AC_CHECK_FUNCS(fileno_unlocked)
+AC_CHECK_FUNCS(fflush_unlocked)
 
 AC_CHECK_TYPES(struct timespec)
 AC_SEARCH_LIBS(clock_gettime, [rt])

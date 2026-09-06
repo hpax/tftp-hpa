@@ -386,6 +386,26 @@ const char *gai_strerror(int);
 const char *inet_ntop(int, const void *, char *, socklen_t);
 #endif
 
+/* If unlocked stdio is unavailable, use normal stdio */
+#ifndef HAVE_FREAD_UNLOCKED
+# define fread_unlocked(p,s,n,f) fread(p,s,n,f)
+#endif
+#ifndef HAVE_FWRITE_UNLOCKED
+# define fwrite_unlocked(p,s,n,f) fwrite(p,s,n,f)
+#endif
+#ifndef HAVE_GETC_UNLOCKED
+# define getc_unlocked(f) getc(f)
+#endif
+#ifndef HAVE_PUTC_UNLOCKED
+# define putc_unlocked(c,f) putc(c,f)
+#endif
+#ifndef HAVE_FERROR_UNLOCKED
+# define ferror_unlocked(f) ferror(f)
+#endif
+#ifndef HAVE_FEOF_UNLOCKED
+# define feof_unlocked(f) feof(f)
+#endif
+
 /* HAVE_IPV6 as a boolean */
 #ifdef HAVE_IPV6
 # define WITH_IPV6 1

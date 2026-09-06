@@ -81,7 +81,7 @@ static int octet_read_packet(struct tftp_io *io, struct tftphdr *dp)
 {
     size_t n;
 
-    n = fread(dp->th_data, 1, io->blocksize, io->file);
+    n = fread_unlocked(dp->th_data, 1, io->blocksize, io->file);
     if (n < io->blocksize && ferror(io->file)) {
         errno = EIO;
         return -1;
@@ -101,7 +101,7 @@ static int netascii_read_packet(struct tftp_io *io, struct tftphdr *dp)
             c = io->prevchar == '\n' ? '\n' : '\0';
             io->newline = false;
         } else {
-            c = getc(io->file);
+            c = getc_unlocked(io->file);
             if (c == EOF) {
                 if (ferror(io->file)) {
                     errno = EIO;
@@ -123,7 +123,7 @@ static int netascii_read_packet(struct tftp_io *io, struct tftphdr *dp)
 static int octet_write_packet(struct tftp_io *io, const struct tftphdr *dp,
                               int count)
 {
-    if (fwrite(dp->th_data, 1, count, io->file) != (size_t)count) {
+    if (fwrite_unlocked(dp->th_data, 1, count, io->file) != (size_t)count) {
         errno = EIO;
         return -1;
     }
@@ -146,12 +146,12 @@ static int netascii_write_packet(struct tftp_io *io,
                 c = '\n';
             } else if (c == '\0') {
                 c = '\r';
-            } else if (putc('\r', io->file) == EOF) {
+            } else if (putc_unlocked('\r', io->file) == EOF) {
                 errno = EIO;
                 return -1;
             }
             io->write_cr = false;
-            if (putc(c, io->file) == EOF) {
+            if (putc_unlocked(c, io->file) == EOF) {
                 errno = EIO;
                 return -1;
             }
@@ -161,7 +161,7 @@ static int netascii_write_packet(struct tftp_io *io,
             io->write_cr = true;
             continue;
         }
-        if (putc(c, io->file) == EOF) {
+        if (putc_unlocked(c, io->file) == EOF) {
             errno = EIO;
             return -1;
         }
@@ -183,7 +183,7 @@ static int octet_write_finish(struct tftp_io *io)
 static int netascii_write_finish(struct tftp_io *io)
 {
     if (io->write_cr) {
-        if (putc('\r', io->file) == EOF) {
+        if (putc_unlocked('\r', io->file) == EOF) {
             errno = EIO;
             return -1;
         }
