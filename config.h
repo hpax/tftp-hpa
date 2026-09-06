@@ -405,6 +405,12 @@ const char *inet_ntop(int, const void *, char *, socklen_t);
 #ifndef HAVE_FEOF_UNLOCKED
 # define feof_unlocked(f) feof(f)
 #endif
+#ifndef HAVE_FILENO_UNLOCKED
+# define fileno_unlocked(f) fileno(f)
+#endif
+#ifndef HAVE_FFLUSH_UNLOCKED
+# define fflush_unlocked(f) fflush(f)
+#endif
 
 /* HAVE_IPV6 as a boolean */
 #ifdef HAVE_IPV6

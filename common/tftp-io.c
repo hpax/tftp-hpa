@@ -172,7 +172,7 @@ static int netascii_write_packet(struct tftp_io *io,
 static int octet_write_finish(struct tftp_io *io)
 {
     errno = 0;
-    if (fflush(io->file)) {
+    if (fflush_unlocked(io->file)) {
         if (!errno)
             errno = EIO;
         return -1;
@@ -190,7 +190,7 @@ static int netascii_write_finish(struct tftp_io *io)
         io->write_cr = false;
     }
     errno = 0;
-    if (fflush(io->file)) {
+    if (fflush_unlocked(io->file)) {
         if (!errno)
             errno = EIO;
         return -1;
@@ -568,7 +568,7 @@ static int tftp_io_write_drain(void *vctx)
         }
         error = io->error;
     }
-    if (!error && fflush(io->file)) {
+    if (!error && fflush_unlocked(io->file)) {
         error = errno ? errno : EIO;
 #ifdef HAVE_PTHREAD
     if (io->threaded)
