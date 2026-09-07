@@ -20,7 +20,7 @@
 void set_signal(int signum, sighandler_t handler, int flags)
 {
     if (tftp_signal(signum, handler, flags)) {
-        tftpd_log(LOG_ERR, "sigaction: %m");
+        tftpd_log(LOG_ERR, "sigaction: %s", strerror(errno));
         exit(EX_OSERR);
     }
 }

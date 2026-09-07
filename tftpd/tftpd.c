@@ -4,6 +4,7 @@
  * Copyright (c) 1983 Regents of the University of California.
  * Copyright (c) 1999-2009 H. Peter Anvin
  * Copyright (c) 2011-2014 Intel Corporation; author: H. Peter Anvin
+ * Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
  * All rights reserved.
  */
 
@@ -223,7 +224,8 @@ static struct rule *read_remap_rules(const char *rulefile)
 
     f = fopen(rulefile, "rt");
     if (!f) {
-        tftpd_log(LOG_ERR, "Cannot open map file: %s: %m", rulefile);
+        tftpd_log(LOG_ERR, "Cannot open map file: %s: %s",
+                  rulefile, strerror(errno));
         exit(EX_NOINPUT);
     }
     rulep = parserulefile(f);
@@ -338,7 +340,7 @@ static const struct tftp_xfer_ops daemon_xfer_ops = {
 
 static void tftpd_out_of_memory(void)
 {
-    tftpd_log(LOG_ERR, "fatal error: %m");
+    tftpd_log(LOG_ERR, "fatal error: %s", strerror(errno));
     exit(EX_OSERR);
 }
 
@@ -669,8 +671,8 @@ int main(int argc, char **argv)
     if (map_test_file) {
         FILE *tf = fopen(map_test_file, "r");
         if (!tf) {
-            tftpd_log(LOG_ERR, "%s: cannot open map test file: %m",
-                      map_test_file);
+            tftpd_log(LOG_ERR, "%s: cannot open map test file: %s",
+                      map_test_file, strerror(errno));
             exit(EX_NOINPUT);
         }
         rewrite_test(tf);
@@ -708,7 +710,7 @@ int main(int argc, char **argv)
 
         char *securepath = build_path(dirs[0]);
         if (chdir(securepath)) {
-            tftpd_log(LOG_ERR, "%s: %m", securepath);
+            tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
             exit(EX_NOINPUT);
         }
         free(securepath);
@@ -716,7 +718,7 @@ int main(int argc, char **argv)
 
     pw = getpwnam(user);
     if (!pw) {
-        tftpd_log(LOG_ERR, "no user %s: %m", user);
+        tftpd_log(LOG_ERR, "no user %s: %s", user, strerror(errno));
         exit(EX_NOUSER);
     }
 
@@ -780,7 +782,7 @@ int main(int argc, char **argv)
         /* Note: when running in secure mode (-s), we must not chdir, since
            we are already in the proper directory. */
         if (!nodaemon && daemon(secure, true) < 0) {
-            tftpd_log(LOG_ERR, "cannot daemonize: %m");
+            tftpd_log(LOG_ERR, "cannot daemonize: %s", strerror(errno));
             exit(EX_OSERR);
         }
     } else {
@@ -806,7 +808,9 @@ int main(int argc, char **argv)
     if (pidfile) {
         FILE *pf = fopen(pidfile, "w");
         if (!pf) {
-            tftpd_log(LOG_ERR, "cannot open pid file '%s' for writing: %m", pidfile);
+            tftpd_log(LOG_ERR,
+                      "cannot open pid file '%s' for writing: %s",
+                      pidfile, strerror(errno));
             pidfile = NULL;
         } else {
             bool err = fprintf(pf, "%d\n", getpid()) < 0;
@@ -814,7 +818,8 @@ int main(int argc, char **argv)
             bool close_error = fclose(pf) != 0;
             err = err || write_error || close_error;
             if (err)
-                tftpd_log(LOG_ERR, "error writing pid file '%s': %m", pidfile);
+                tftpd_log(LOG_ERR, "error writing pid file '%s': %s",
+                          pidfile, strerror(errno));
         }
     }
 
@@ -847,7 +852,8 @@ int main(int argc, char **argv)
 
         if (exit_signal) {
             if (pidfile && unlink(pidfile)) {
-                tftpd_log(LOG_WARNING, "error removing pid file '%s': %m", pidfile);
+                tftpd_log(LOG_WARNING, "error removing pid file '%s': %s",
+                          pidfile, strerror(errno));
                 exit(EX_OSERR);
             } else {
                 exit(0);
@@ -867,7 +873,7 @@ int main(int argc, char **argv)
             continue;           /* Signal caught, reloop */
 
         if (rv == -1) {
-            tftpd_log(LOG_ERR, "listen loop: %m");
+            tftpd_log(LOG_ERR, "listen loop: %s", strerror(errno));
             exit(EX_IOERR);
         } else if (rv == 0) {
             exit(0);            /* Timeout, return to inetd */
@@ -887,7 +893,7 @@ int main(int argc, char **argv)
             if (E_WOULD_BLOCK(errno) || errno == EINTR) {
                 continue;       /* Again, from the top */
             } else {
-                tftpd_log(LOG_ERR, "recvfrom: %m");
+                tftpd_log(LOG_ERR, "recvfrom: %s", strerror(errno));
                 exit(EX_IOERR);
             }
         }
@@ -941,7 +947,7 @@ int main(int argc, char **argv)
          */
         pid = fork();
         if (pid < 0) {
-            tftpd_log(LOG_ERR, "fork: %m");
+            tftpd_log(LOG_ERR, "fork: %s", strerror(errno));
             exit(EX_OSERR);     /* Return to inetd, just in case */
         } else if (pid == 0)
             break;              /* Child exit, parent loop */
@@ -968,7 +974,7 @@ int main(int argc, char **argv)
 
     peer = socket(myaddr.sa.sa_family, SOCK_DGRAM, 0);
     if (peer < 0) {
-        tftpd_log(LOG_ERR, "socket: %m");
+        tftpd_log(LOG_ERR, "socket: %s", strerror(errno));
         exit(EX_IOERR);
     }
 
@@ -999,7 +1005,7 @@ int main(int argc, char **argv)
     /* Chroot and drop privileges */
     if (secure) {
         if (chroot(".")) {
-            tftpd_log(LOG_ERR, "chroot: %m");
+            tftpd_log(LOG_ERR, "chroot: %s", strerror(errno));
             exit(EX_OSERR);
         }
 #ifdef __CYGWIN__
@@ -1032,18 +1038,18 @@ int main(int argc, char **argv)
     }
 
     if (setrv) {
-        tftpd_log(LOG_ERR, "cannot drop privileges: %m");
+        tftpd_log(LOG_ERR, "cannot drop privileges: %s", strerror(errno));
         exit(EX_OSERR);
     }
 
     /* Process the request... */
     if (pick_port_bind(peer, &myaddr, portrange_from, portrange_to) < 0) {
-        tftpd_log(LOG_ERR, "bind: %m");
+        tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
         exit(EX_IOERR);
     }
 
     if (connect(peer, &from.sa, SOCKLEN(&from)) < 0) {
-        tftpd_log(LOG_ERR, "connect: %m");
+        tftpd_log(LOG_ERR, "connect: %s", strerror(errno));
         exit(EX_IOERR);
     }
 
@@ -1733,13 +1739,13 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
       oack:
         r_timeout = timeout;
         if (send(peer, oap, oacklen, 0) != oacklen) {
-            tftpd_log(LOG_WARNING, "tftpd: oack: %m\n");
+            tftpd_log(LOG_WARNING, "tftpd: oack: %s\n", strerror(errno));
             goto out;
         }
         for (;;) {
             n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
             if (n < 0) {
-                tftpd_log(LOG_WARNING, "tftpd: read: %m\n");
+                tftpd_log(LOG_WARNING, "tftpd: read: %s\n", strerror(errno));
                 goto out;
             }
             ap = (struct tftphdr *)ackbuf;
@@ -1784,11 +1790,11 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: write: %m");
+        tftpd_log(LOG_WARNING, "tftpd: write: %s", strerror(errno));
         break;
     case TFTP_XFER_RECV_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: read(ack): %m");
+        tftpd_log(LOG_WARNING, "tftpd: read(ack): %s", strerror(errno));
         break;
     default:
         break;
@@ -1856,11 +1862,11 @@ static void tftp_recvfile(const struct formats *pf,
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: write(ack): %m");
+        tftpd_log(LOG_WARNING, "tftpd: write(ack): %s", strerror(errno));
         break;
     case TFTP_XFER_RECV_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: read: %m");
+        tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
         break;
     default:
         break;
@@ -1955,5 +1961,5 @@ static void nak(int error, const char *msg)
     }
 
     if (send(peer, buf, length, 0) != length)
-        tftpd_log(LOG_WARNING, "nak: %m");
+        tftpd_log(LOG_WARNING, "nak: %s", strerror(errno));
 }

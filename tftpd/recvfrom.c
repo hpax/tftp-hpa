@@ -56,7 +56,8 @@ void set_socket_nonblock(int fd, bool flag)
     return;
 
 err:
-        tftpd_log(LOG_ERR, "Cannot set nonblock flag on socket: %m");
+        tftpd_log(LOG_ERR, "Cannot set nonblock flag on socket: %s",
+                  strerror(errno));
         exit(EX_OSERR);
 }
 
