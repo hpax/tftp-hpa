@@ -3,6 +3,7 @@
  *
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
  */
 
 #include "common/tftpsubs.h"
@@ -24,17 +25,8 @@ extern int maxtimeout;
 extern unsigned int blocksize;
 extern unsigned int windowsize;
 
-/*
- * Size of the client's own request-encoding buffer (ackbuf). This is
- * intentionally named differently from the identically-purposed
- * PKTSIZE macro in common/tftpsubs.c and tftpd/tftpd.c, which is
- * MAX_SEGSIZE+4: this client never negotiates a larger block size, so
- * ackbuf holds requests, option acknowledgments, and small control
- * packets.  It needs to accommodate requests containing RFC 2347 options.
- */
-#define REQBUFSIZE MAX_SEGSIZE+4
 #define USEC_PER_SEC 1000000UL
-static char ackbuf[REQBUFSIZE];
+static char *ackbuf;
 static unsigned long timeout;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
@@ -132,8 +124,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
                    unsigned int requested_window)
 {
     struct tftphdr *ap;
-    char response[REQBUFSIZE];
-    const struct tftphdr *rp = (const struct tftphdr *)response;
+    char *response;
+    const struct tftphdr *rp;
     union sock_addr from;
     FILE *file = NULL;
     struct tftp_io * volatile io = NULL;
@@ -149,6 +141,10 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
 
+    ackbuf = xmalloc(TFTP_XFER_MAX_PACKET_SIZE);
+    response = xmalloc(TFTP_XFER_MAX_PACKET_SIZE);
+    rp = (const struct tftphdr *)response;
+
     startclock();
     file = fdopen(fd, convert ? "rt" : "rb");
     if (!file)
@@ -157,7 +153,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
 
     tftp_signal(SIGALRM, timer, 0);
     size = makerequest(WRQ, name, ap, mode, blocksize, requested_window,
-                       sizeof(ackbuf));
+                       TFTP_XFER_MAX_PACKET_SIZE);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         goto abort;
@@ -175,7 +171,8 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
         }
         r_timeout = timeout;
       wait_for_reply:
-        n = client_recv_time(response, sizeof(response), &from, &r_timeout);
+        n = client_recv_time(response, TFTP_XFER_MAX_PACKET_SIZE,
+                             &from, &r_timeout);
         if (n < 0) {
             perror("tftp: recvfrom");
             goto abort;
@@ -221,7 +218,7 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     xfer.rollover = 0;
     xfer.resend_oack = requested_window != 0;
     xfer.control = ackbuf;
-    xfer.control_size = sizeof(ackbuf);
+    xfer.control_size = TFTP_XFER_MAX_PACKET_SIZE;
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
     xfer.io_context = io;
@@ -253,6 +250,9 @@ void tftp_sendfile(int fd, const char *name, const char *mode,
     tftp_io_stop(io);
     if (file)
         fclose(file);
+    xfree(response);
+    xfree(ackbuf);
+    ackbuf = NULL;
     stopclock();
     if (amount > 0)
         printstats("Sent", amount);
@@ -284,6 +284,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
 
+    ackbuf = xmalloc(TFTP_XFER_MAX_PACKET_SIZE);
+
     startclock();
     file = fdopen(fd, convert ? "wt" : "wb");
     if (!file)
@@ -291,7 +293,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     initial_packet = xmalloc(TFTP_XFER_MAX_PACKET_SIZE);
     ap = (struct tftphdr *)ackbuf;
     size = makerequest(RRQ, name, ap, mode, blocksize, requested_window,
-                       sizeof(ackbuf));
+                       TFTP_XFER_MAX_PACKET_SIZE);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         goto abort;
@@ -363,7 +365,7 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
     xfer.rollover = 0;
     xfer.resend_oack = false;
     xfer.control = ackbuf;
-    xfer.control_size = sizeof(ackbuf);
+    xfer.control_size = TFTP_XFER_MAX_PACKET_SIZE;
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
     xfer.io_context = io;
@@ -406,6 +408,8 @@ void tftp_recvfile(int fd, const char *name, const char *mode,
   abort:
     tftp_io_stop(io);
     xfree(initial_packet);
+    xfree(ackbuf);
+    ackbuf = NULL;
     if (file) {
         fclose(file);
     }

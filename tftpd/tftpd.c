@@ -58,7 +58,7 @@ static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static uint16_t rollover_val = 0;
 
-#define	PKTSIZE	MAX_SEGSIZE+4
+#define	PKTSIZE	(MAX_SEGSIZE + 4)
 #define IO_RING_MIN_BYTES (256U * 1024U)
 #define MAX_MAX_WINDOWSIZE	32768	/* More than this gets dangerous */
 #ifndef MAX_WINDOWSIZE
@@ -70,8 +70,8 @@ static uint16_t rollover_val = 0;
 #if MAX_WINDOWSIZE < 1
 # error MAX_WINDOWSIZE must be at least 1
 #endif
-static char buf[PKTSIZE];
-static char ackbuf[PKTSIZE];
+static char *buf;
+static char *ackbuf;
 static unsigned int max_blksize = MAX_SEGSIZE;
 static unsigned int max_windowsize = MAX_WINDOWSIZE;
 static uintmax_t max_windowbytes = MAX_WINDOWBYTES;
@@ -320,7 +320,7 @@ static void daemon_xfer_dally(uint16_t last_acked)
     int n;
 
     timeout_quit = true;
-    n = recv_time(peer, buf, sizeof(buf), 0, &timeout);
+    n = recv_time(peer, buf, PKTSIZE, 0, &timeout);
     timeout_quit = false;
 
     if (n >= 4 &&
@@ -885,15 +885,20 @@ int main(int argc, char **argv)
         if (fd <= 0)
             continue;
 
+        buf = xmalloc(PKTSIZE);
         cygwin_set_socket_nonblock(fd, true);
-        n = myrecvfrom(fd, buf, sizeof(buf), 0, &from, &myaddr);
+        n = myrecvfrom(fd, buf, PKTSIZE, 0, &from, &myaddr);
         cygwin_set_socket_nonblock(fd, false);
 
         if (n < 0) {
-            if (E_WOULD_BLOCK(errno) || errno == EINTR) {
+            int error = errno;
+
+            xfree(buf);
+            buf = NULL;
+            if (E_WOULD_BLOCK(error) || error == EINTR) {
                 continue;       /* Again, from the top */
             } else {
-                tftpd_log(LOG_ERR, "recvfrom: %s", strerror(errno));
+                tftpd_log(LOG_ERR, "recvfrom: %s", strerror(error));
                 exit(EX_IOERR);
             }
         }
@@ -949,8 +954,17 @@ int main(int argc, char **argv)
         if (pid < 0) {
             tftpd_log(LOG_ERR, "fork: %s", strerror(errno));
             exit(EX_OSERR);     /* Return to inetd, just in case */
-        } else if (pid == 0)
-            break;              /* Child exit, parent loop */
+        } else if (pid == 0) {
+            ackbuf = xmalloc(PKTSIZE);
+            break;              /* Child exits listen loop */
+        }
+
+        /*
+         * The child owns this request.  Release the parent's copy before
+         * accepting another packet, avoiding copy-on-write faults in it.
+         */
+        xfree(buf);
+        buf = NULL;
     }
 
     /* Child process: handle the actual request here */
@@ -1303,7 +1317,7 @@ static void negotiate_windowsize(char **ap)
     windowsize = (unsigned int)window;
     optlen = sizeof("windowsize");
     retlen = sprintf(retbuf, "%u", windowsize);
-    if (*ap + optlen + retlen >= ackbuf + sizeof(ackbuf)) {
+    if (*ap + optlen + retlen >= ackbuf + PKTSIZE) {
         nak(EOPTNEG, "Insufficient space for options");
         exit(0);
     }
@@ -1434,7 +1448,7 @@ static void do_opt(const char *opt, const char *val, char **ap)
 		optlen = strlen(opt);
 		retlen = sprintf(retbuf, "%"PRIuMAX, v);
 
-                if (p + optlen + retlen + 2 >= ackbuf + sizeof(ackbuf)) {
+                if (p + optlen + retlen + 2 >= ackbuf + PKTSIZE) {
                     nak(EOPTNEG, "Insufficient space for options");
                     exit(0);
                 }
@@ -1555,6 +1569,7 @@ static void rewrite_test(FILE *tf)
           0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef };
 #endif
     static const char phony_ip4_addr[4] = { 192, 0, 2, 34 };
+    char *line = xmalloc(MAX_SEGSIZE + 1);
     int mode = cancreate ? WRQ : RRQ;
     int af = ai_fam;
 
@@ -1573,25 +1588,26 @@ static void rewrite_test(FILE *tf)
     }
     from.sa.sa_family = af;
 
-    while (fgets(buf, MAX_SEGSIZE+1, tf)) {
+    while (fgets(line, MAX_SEGSIZE + 1, tf)) {
         const char *msg;
         char *out;
-        char *nl = strchr(buf, '\n');
+        char *nl = strchr(line, '\n');
         if (!nl)
             continue;
 
         *nl = '\0';
-        out = rewrite_string(&test_dummy_format, buf, rewrite_rules,
+        out = rewrite_string(&test_dummy_format, line, rewrite_rules,
                              mode, af, rewrite_macros, &msg);
 
         if (out) {
             printf("%s\n", out);
-            if (out != buf)
+            if (out != line)
                 xfree(out);
         } else {
             printf("ERROR: %s\n", msg);
         }
     }
+    xfree(line);
 }
 
 #else
@@ -1743,7 +1759,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
             goto out;
         }
         for (;;) {
-            n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
+            n = recv_time(peer, ackbuf, PKTSIZE, 0, &r_timeout);
             if (n < 0) {
                 tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
                 goto out;
@@ -1777,7 +1793,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
     xfer.rollover = rollover_val;
     xfer.resend_oack = true;
     xfer.control = ackbuf;
-    xfer.control_size = sizeof(ackbuf);
+    xfer.control_size = PKTSIZE;
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = io;
@@ -1844,12 +1860,12 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.rollover = rollover_val;
     xfer.resend_oack = false;
     xfer.control = ackbuf;
-    xfer.control_size = sizeof(ackbuf);
+    xfer.control_size = PKTSIZE;
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = io;
     xfer.io_ops = &tftp_io_xfer_ops;
-    tftp_xfer_recv(&xfer, ap, (struct tftphdr *)buf, sizeof(buf),
+    tftp_xfer_recv(&xfer, ap, (struct tftphdr *)buf, PKTSIZE,
                    initial_reply,
                    initial_reply_len, NULL, 0, &result);
 
