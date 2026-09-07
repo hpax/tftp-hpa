@@ -1141,12 +1141,12 @@ static int tftp(struct tftphdr *tp, int size)
                 }
                 if (filename == origfilename
                     || !strcmp(filename, origfilename))
-                    tftpd_log(LOG_NOTICE, "%s from %s filename %s\n",
+                    tftpd_log(LOG_NOTICE, "%s from %s filename %s",
                            tp_opcode == WRQ ? "WRQ" : "RRQ",
                            tmp_p, filename);
                 else
                     tftpd_log(LOG_NOTICE,
-                           "%s from %s filename %s remapped to %s\n",
+                           "%s from %s filename %s remapped to %s",
                            tp_opcode == WRQ ? "WRQ" : "RRQ",
                            tmp_p, origfilename,
                            filename);
@@ -1745,7 +1745,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         for (;;) {
             n = recv_time(peer, ackbuf, sizeof(ackbuf), 0, &r_timeout);
             if (n < 0) {
-                tftpd_log(LOG_WARNING, "tftpd: read: %s\n", strerror(errno));
+                tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
                 goto out;
             }
             ap = (struct tftphdr *)ackbuf;
