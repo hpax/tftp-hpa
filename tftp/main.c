@@ -241,7 +241,7 @@ static const struct option long_options[] = {
     { NULL,         0,                 NULL, 0 }
 };
 
-static const char short_options[] = "+46vVlm:cR:B:W:w:h";
+static const char short_options[] = "+46vVlm:cR:B:W:w:abh";
 
 int main(int argc, char *argv[])
 {
