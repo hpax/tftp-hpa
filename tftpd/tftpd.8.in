@@ -257,7 +257,7 @@ instead of returning a \fBwindowsize\fP option.
 The compile-time default is set by the \fBTFTPD_MAX_WINDOWBYTES\fP
 configure variable) and defaults to 4194304 (4 MiB).
 .TP
-\fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
+\fB\-R\fP, \fB\-\-port-range\fP, \fB\-\-ports\fP \fImin-port:max-port\fP
 Force the server port number (the Transaction ID) to be in the
 specified range of port numbers. This can be used to make filewall
 rules or packet tracing easier.
@@ -267,6 +267,9 @@ The
 and
 .I max-port
 values must be decimal numbers between 1 and 65535.
+.TP
+\fB\-\-stderr\fP
+Log messages to standard error instead of syslog.
 .TP
 \fB\-\-systemd\fP
 Use

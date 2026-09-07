@@ -68,6 +68,7 @@ Equivalent to
 \fB\-b\fP, \fB\-\-binary\fP, \fB\-\-octet\fP
 Equivalent to
 .BR "\-\-mode octet" .
+.TP
 \fB\-B\fP, \fB\-\-blocksize\fP \fIblock-size\fP
 Request the RFC 2348 \fBblksize\fP option.  This requests data blocks up
 to \fIblock-size\fP bytes; valid values are 8 through 65464.  The default
@@ -76,7 +77,7 @@ does not request the option.
 \fB\-W\fP, \fB\-w\fP, \fB\-\-windowsize\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option.  This permits up to
 \fIwindow-size\fP data blocks to be sent before an acknowledgment is
-required.  Valid values are 1 through 64.  The default does not request
+required.  Valid values are 1 through 32768.  The default does not request
 the option.
 .TP
 \fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
