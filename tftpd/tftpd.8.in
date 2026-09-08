@@ -180,7 +180,10 @@ or
 .B utimeout
 option is negotiated.  The default is 1000000 (1 second.)
 .IP
-For subsequent retransmissions, the
+For subsequent retransmissions of the same packet,
+.B tftpd
+applies exponential backoff as required by
+RFC 1123.
 .TP
 \fB\-m\fP, \fB\-\-map-file\fP \fIremap-file\fP
 Specify the use of filename remapping.  The
