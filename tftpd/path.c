@@ -48,6 +48,19 @@ static bool is_valid_char(unsigned char c)
 }
 
 /*
+ * Return true if the given character is a pathname separator that
+ * should be collapsed when merging paths.
+ */
+static bool is_dir_separator(char c)
+{
+#ifdef _WIN32
+    return c == '/' || c == '\\';
+#else
+    return c == '/';
+#endif
+}
+
+/*
  * Validate a filename (path component) for the platform, beyond what
  * is_valid_char() does.
  */
@@ -225,14 +238,22 @@ fail:
 }
 
 /*
- * Construct a canonical form path from a directory list.
- * Returns a newly allocated string.
+ * Construct a canonical form path from a directory list, optionally
+ * prepended with a path prefix. Returns a newly allocated string.
  */
-char *build_path(const char * const *dirs)
+char *build_path(const char *prefix, const char * const *dirs)
 {
     size_t size = 1;            /* Space for NUL terminator */
+    size_t prefix_len = 0;
     const char * const *dp;
     char *path, *q;
+
+    if (prefix) {
+        prefix_len = strlen(prefix);
+        while (prefix_len && is_dir_separator(prefix[prefix_len-1]))
+            prefix_len--;
+    }
+    size += prefix_len;
 
     for (dp = dirs; *dp; dp++) {
         size_t len = strlen(*dp);
@@ -240,6 +261,10 @@ char *build_path(const char * const *dirs)
     }
 
     q = path = xmalloc(size);
+    if (prefix_len) {
+        memcpy(q, prefix, prefix_len);
+        q += prefix_len;
+    }
 
     for (dp = dirs; *dp; dp++) {
         size_t len = strlen(*dp);

@@ -57,6 +57,8 @@ static bool timeout_quit;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static uint16_t rollover_val = 0;
+static const char *path_prefix = NULL;
+static bool rooted = false;
 
 #define	PKTSIZE	(MAX_SEGSIZE + 4)
 #define IO_RING_MIN_BYTES (256U * 1024U)
@@ -368,7 +370,8 @@ enum long_only_options {
     OPT_MAP_STEPS,
     OPT_SYSTEMD,
     OPT_WINDOW_BYTES,
-    OPT_REJECT_ALL
+    OPT_REJECT_ALL,
+    OPT_PATH_PREFIX
 };
 
 static const struct option long_options[] = {
@@ -397,7 +400,9 @@ static const struct option long_options[] = {
     { "retransmit",  1, NULL, 'T' },
     { "port-range",  1, NULL, 'R' },
     { "ports",       1, NULL, 'R' },
+    { "rooted",      0, NULL, '/' },
     { "service",     1, NULL, 'S' },
+    { "path-prefix", 1, NULL, OPT_PATH_PREFIX },
     { "port",        1, NULL, 'S' },
     { "map-file",    1, NULL, 'm' },
     { "map-steps",   1, NULL, OPT_MAP_STEPS },
@@ -407,7 +412,7 @@ static const struct option long_options[] = {
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { NULL, 0, NULL, 0 }
 };
-static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
+static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:/S:m:P:";
 
 static struct pollset *listen_set;
 
@@ -415,6 +420,18 @@ static void close_listen_set(void)
 {
     if (listen_set)
         pollset_close(&listen_set);
+}
+
+static bool is_directory(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) < 0)
+        return false;
+    if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+    }
+    return true;
 }
 
 int main(int argc, char **argv)
@@ -587,6 +604,9 @@ int main(int argc, char **argv)
                 portrange = true;
             }
             break;
+        case '/':
+            rooted = true;
+            break;
         case 'u':
             user = optarg;
             break;
@@ -650,6 +670,9 @@ int main(int argc, char **argv)
             nodaemon = true;
             systemd = true;
             break;
+        case OPT_PATH_PREFIX:
+            path_prefix = *optarg ? optarg : NULL;
+            break;
         case 'V':
             /* Print configuration to stdout and exit */
             printf("%s\n", TFTPD_CONFIG_STR);
@@ -683,13 +706,24 @@ int main(int argc, char **argv)
     }
 #endif
 
+    if (path_prefix) {
+        if (!is_directory(path_prefix)) {
+            tftpd_log(LOG_ERR, "%s: invalid path prefix: %s",
+                      path_prefix, strerror(errno));
+            exit(EX_DATAERR);
+        }
+    }
+
     dirs = xmalloc((argc - optind + 1) * sizeof(char *));
     patherr = false;
     for (ndirs = 0; optind != argc; optind++) {
         const char *path = argv[optind];
         const char * const *pathlist = parse_path(path, !secure);
         if (!pathlist) {
-            tftpd_log(LOG_ERR, "invalid path: %s", path);
+            tftpd_log(LOG_ERR, "invalid directory path: %s", path);
+            patherr = true;
+        } else if (!pathlist[0] && !path_prefix) {
+            tftpd_log(LOG_ERR, "/ as directory path requires --path-prefix");
             patherr = true;
         }
         dirs[ndirs++] = pathlist;
@@ -710,7 +744,7 @@ int main(int argc, char **argv)
             exit(EX_USAGE);
         }
 
-        char *securepath = build_path(dirs[0]);
+        char *securepath = build_path(path_prefix, dirs[0]);
         if (chdir(securepath)) {
             tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
             exit(EX_NOINPUT);
@@ -1078,9 +1112,10 @@ int main(int argc, char **argv)
     exit(0);
 }
 
-static char *rewrite_access(const struct formats *,
-			    char *, int, int, const char **);
-static int validate_access(char *, int, const struct formats *, const char **);
+static const char *rewrite_access(const struct formats *,
+                                  const char *, int, int, const char **);
+static int validate_access(const char *, int, const struct formats *,
+                           const char **);
 static void tftp_sendfile(const struct formats *, struct tftphdr *, int,
                           const char *);
 static void tftp_recvfile(const struct formats *, struct tftphdr *, int,
@@ -1104,7 +1139,8 @@ static int tftp(struct tftphdr *tp, int size)
     int argn, ecode;
     const struct formats *pf = NULL;
     char *origfilename, *request_filename;
-    char *filename, *mode = NULL;
+    const char *filename;
+    char *mode = NULL;
     const char *errmsgptr;
     uint16_t tp_opcode = ntohs(tp->th_opcode);
 
@@ -1541,22 +1577,7 @@ static size_t rewrite_macros(char macro, const char **output)
     }
 }
 
-/*
- * Modify the filename, if applicable.  If it returns NULL, deny the access.
- */
-static char *rewrite_access(const struct formats *pf, char *filename,
-			    int mode, int af, const char **msg)
-{
-    if (rewrite_rules) {
-        char *newname =
-            rewrite_string(pf, filename, rewrite_rules, mode, af,
-                           rewrite_macros, msg);
-        filename = newname;
-    }
-    return filename;
-}
-
-static int test_validate_fail(char *filename, int mode,
+static int test_validate_fail(const char *filename, int mode,
                               const struct formats *pf,
                               const char **errmsg)
 {
@@ -1621,16 +1642,43 @@ static void rewrite_test(FILE *tf)
 }
 
 #else
-static char *rewrite_access(const struct formats *pf, char *filename,
-			    int mode, int af, const char **msg)
+#endif
+
+/*
+ * Modify the filename, if applicable.  If it returns NULL, deny the access.
+ * Returns either filename or a newly malloc'd buffer.
+ */
+static const char *rewrite_access(const struct formats *pf,
+                                  const char *filename,
+                                  int mode, int af, const char **msg)
 {
+    char *newfn = NULL;
+    if (filename[0] != '/') {
+        if (rooted) {
+            size_t len = strlen(filename);
+            newfn = xmalloc(len+2);
+            memcpy(newfn+1, filename, len+1);
+            newfn[0] = '/';
+            filename = newfn;
+        }
+    }
+
+#ifdef REGEX
+    if (rewrite_rules) {
+        filename = rewrite_string(pf, filename, rewrite_rules, mode, af,
+                                  rewrite_macros, msg);
+        xfree(newfn);
+    }
+#else
+    /* Avoid warnings */
     (void)pf;
-    (void)mode;                 /* Avoid warning */
+    (void)mode;
     (void)msg;
     (void)af;
+#endif
+
     return filename;
 }
-#endif
 
 /*
  * Validate file access and open the corresponding file.  Returns 0 if
@@ -1649,11 +1697,12 @@ static char *rewrite_access(const struct formats *pf, char *filename,
  * If "secure" is set the file path is used as-is, as the kernel
  * is expected to enforce any namespace restrictions.
  */
-static int validate_access(char *filename, int mode,
+static int validate_access(const char *filename, int mode,
 			   const struct formats *pf, const char **errmsg)
 {
     struct stat stbuf;
     int fd, wmode, rmode;
+    char *fnbuf = NULL;
     const char * const **dirp;
     char stdio_mode[3];
 
@@ -1677,7 +1726,7 @@ static int validate_access(char *filename, int mode,
             return (EACCESS);
         }
 
-        filename = build_path(pathlist);
+        filename = fnbuf = build_path(path_prefix, pathlist);
         free(pathlist);
     }
 
@@ -1696,7 +1745,7 @@ static int validate_access(char *filename, int mode,
     if (fd < 0)
         fd = -errno;
     if (!secure)
-        free(filename);
+        free(fnbuf);
     if (fd < 0)
         return fd;
 

@@ -105,8 +105,9 @@ start_server() {
 
     # Start tftpd in the background, listening on localhost
     # Run in standalone mode, serve from SERVER_DIR
-    local -a TFTPD_CMD=("$TFTPD" --stderr -L -p --port-range $PORTRANGE
-				 -c $addrs "$SERVER_DIR")
+    local -a TFTPD_CMD=("$TFTPD" --stderr -L -p
+			--port-range $PORTRANGE -c $addrs
+			-/ --path-prefix "$SERVER_DIR" /)
     print_info "${TFTPD_CMD[*]}"
     "${TFTPD_CMD[@]}" &
     TFTPD_PID=$!
@@ -199,7 +200,7 @@ test_download() {
     # Use non-interactive tftp with get command
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" $mode
 		       "$LOCALHOST" "$PORT"
-		       -c get "$server_file" "$download_file")
+		       -c get "$filename" "$download_file")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
@@ -240,7 +241,7 @@ test_upload() {
     # The server will write it to SERVER_DIR
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" "$mode"
 		       "$LOCALHOST" "$PORT"
-		       -c put "$TEST_DIR/$filename" "$server_file")
+		       -c put "$TEST_DIR/$filename" "$filename")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"

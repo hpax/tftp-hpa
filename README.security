@@ -1,3 +1,15 @@
+Starting in version 6.2, tftp-hpa has a --path-prefix option to
+prepend a path string to the requested file *after* remapping and
+filename validation. This may be used as an alternative to -s that
+does not require the daemon to be run as root, but make sure that all
+implications of this are understood, such as the consequences of
+symbolic links.
+
+The --rooted option can be used to add a slash to the beginning of the
+client's requested path if the client did not include one already.
+
+		=======================================
+
 Starting in version 6.0, tftp-hpa no longer supports using tcpwrappers
 for client permit/denial. If this is desired, use kernel-level
 firewalling on the TFTP listen port.
@@ -6,7 +18,7 @@ As TFTP only uses the listen port for the request packet, the
 performance cost is neglible, and far less than having tftpd search
 the tcpwrapper configuration.
 
-	       =======================================
+		=======================================
 
 Starting in version 0.27, tftp-hpa has the option of a "use Unix
 permissions" mode.  In this mode, tftpd can access any file accessible
@@ -34,7 +46,7 @@ root. On Linux (at least), restricted mount trees and socket
 activation (via inetd or systemd) set up before tftpd is even started
 can avoid the need to run as root at all.
 
-	       =======================================
+		=======================================
 
 Starting in version 0.17, tftp-hpa operates in genuine "wait" mode,
 which means that an in.tftpd process hangs around for some time after

@@ -8,7 +8,7 @@
 .\" Copyright 2001-2009, 2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTPD 8 "27 August 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
+.TH TFTPD 8 "8 September 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
 
 .SH NAME
 .B tftpd
@@ -28,6 +28,33 @@ The server can be run as a standalone daemon or it can be started by
 .MR xinetd 8 ,
 or
 .MR systemd 1 .
+.PP
+.I directory...
+should specify one or more directories to which
+.B tftpd
+may have access. Note that if the
+.B \-\-path-prefix
+option (see below) has been specified, the directory names listed
+should not include the
+.I prefix
+itself.
+.PP
+The directory names must follow the rules described under
+\fBPATH VALIDATION\fP, or they will be rejected; notably they must
+begin with
+.RB \\[lq] / \\[rq]
+and may not contain
+.RB \\[lq] . \\[rq]
+or
+.RB \\[lq] .. \\[rq]
+components.
+.PP
+.RB \\[lq] / \\[rq]
+is only allowed as a
+.I directory
+in conjunction with the
+.B \-\-path-prefix
+option.
 
 .SH OPTIONS
 .PP
@@ -134,6 +161,45 @@ described under
 .I "PATH VALIDATION"
 below are performed; any desired checks will have to be implemented
 using explicit remap rules.
+.IP
+Using
+.B \-\-secure
+requires
+.B tftpd
+
+to be started out as root, and run as root for a considerable amount
+of time. Consider very carefully if this is genuinely desirable as
+oppposed to running the daemon as an unprivileged user and using a
+remap rules file and/or the
+.B \-\-path-prefix
+option instead.
+.TP
+\fB\-\-path-prefix\fP \fIprefix\fP
+Prepends \fIprefix\fP to the local filesystem path
+.I after
+filename remapping and path validation (see below) have taken
+place.
+.B tftpd
+verifies that
+\fIprefix\fP
+refers to an existing directory, but performs no other validity or
+permissions checks.
+.IP
+If the
+.B \-\-secure
+option is used,
+.I prefix
+is instead prepended to the root path; in other words:
+.IP
+.B \-\-path-prefix
+/var/lib
+.B \-\-secure
+/tftpboot
+.IP
+is exactly equivalent to:
+.IP
+.B \-\-secure
+/var/lib/tftpboot
 .TP
 \fB\-u\fP, \fB\-\-user\fP \fIusername\fP
 Specify the username which
@@ -212,6 +278,19 @@ options to simulate an IPv4 or IPv6 client. If
 .B \-\-create
 is included on the command line, simulate a PUT (WRQ) request,
 otherwise simulate a GET (RRQ) request.
+.TP
+\fB\-/\fP, \fB\-\-rooted\fP
+If the filename requested by the client does not begin with
+.RB \\[lq] / \\[rq],
+automatically prepend a slash. This happens
+.I before
+filename remapping and path validation.
+.IP
+This option can be used with
+.B \-\-path-prefix
+to obtain an effect similar to
+.B \-\-secure
+without needing a full remap file.
 .TP
 \fB\-v\fP, \fB\-\-verbose\fP
 Increase the logging verbosity of
@@ -615,6 +694,12 @@ list of hard-coded Windows reserved filenames.
 Validation and canonicalization are performed
 .I after
 filename remapping, if remapping is used.
+.PP
+If the
+.B \-\-path-prefix
+option is specified, then the path prefix is prepended
+.I after
+path validation has taken place.
 .PP
 When
 .B \-\-secure

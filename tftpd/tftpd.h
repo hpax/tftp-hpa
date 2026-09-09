@@ -32,8 +32,10 @@ extern int verbosity;
 
 struct formats {
     const char *f_mode;
-    char *(*f_rewrite) (const struct formats *, char *, int, int, const char **);
-    int (*f_validate) (char *, int, const struct formats *, const char **);
+    const char *(*f_rewrite) (const struct formats *, const char *,
+                              int, int, const char **);
+    int (*f_validate) (const char *, int, const struct formats *,
+                       const char **);
     void (*f_send) (const struct formats *, struct tftphdr *, int,
                     const char *);
     void (*f_recv) (const struct formats *, struct tftphdr *, int,
