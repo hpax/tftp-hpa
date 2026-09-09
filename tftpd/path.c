@@ -270,6 +270,8 @@ char *build_path(const char *prefix, const char * const *dirs)
         q = stpcpy(q, *dp);
     }
 
+    /* If the dirs list is empty, stpcpy() won't have added a null byte */
+    *q = '\0';
     return path;
 }
 
