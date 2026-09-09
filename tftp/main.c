@@ -3,6 +3,7 @@
  *
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
  */
 
 #include "common/tftpsubs.h"
@@ -65,6 +66,7 @@ bool trace;
 int verbose;
 static bool literal;
 static bool connected;
+static bool iscmd;
 static const struct modes *mode;
 #ifdef WITH_READLINE
 static char *line = NULL;
@@ -84,23 +86,23 @@ static unsigned int portrange_to = 0;
 unsigned int blocksize = SEGSIZE;
 unsigned int windowsize;
 
-static void get(int, char **);
-static void help(int, char **);
-static void modecmd(int, char **);
-static void put(int, char **);
-static void quit(int, char **);
-static void setascii(int, char **);
-static void setbinary(int, char **);
-static void setblocksize(int, char **);
-static void setpeer(int, char **);
-static void setrexmt(int, char **);
-static void settimeout(int, char **);
-static void settrace(int, char **);
-static void set_verbosity(const char *, bool);
-static void setverbose(int, char **);
-static void status(int, char **);
-static void setliteral(int, char **);
-static void setwindowsize(int, char **);
+static int get(int, char **);
+static int help(int, char **);
+static int modecmd(int, char **);
+static int put(int, char **);
+static int quit(int, char **);
+static int setascii(int, char **);
+static int setbinary(int, char **);
+static int setblocksize(int, char **);
+static int setpeer(int, char **);
+static int setrexmt(int, char **);
+static int settimeout(int, char **);
+static int settrace(int, char **);
+static int set_verbosity(const char *, bool);
+static int setverbose(int, char **);
+static int status(int, char **);
+static int setliteral(int, char **);
+static int setwindowsize(int, char **);
 
 static void command(void);
 
@@ -116,7 +118,7 @@ static void settftpmode(const struct modes *);
 struct cmd {
     const char *name;
     const char *help;
-    void (*handler) (int, char **);
+    int (*handler) (int, char **);
 };
 
 static const struct cmd cmdtab[] = {
@@ -246,9 +248,8 @@ static const char short_options[] = "+46vVlm:cR:B:W:w:abh";
 int main(int argc, char *argv[])
 {
     union sock_addr sa;
-    int optc;
+    int optc, ret;
     static int pargc, peerargc;
-    static bool iscmd;
     static char **pargv;
     char *peerargv[3];
 
@@ -383,7 +384,7 @@ int main(int argc, char *argv[])
         /* Set peer */
         if (sigsetjmp(toplevel, 1) != 0)
             exit(EX_NOHOST);
-        setpeer(peerargc, peerargv);
+        (void)setpeer(peerargc, peerargv);
     }
 
     if (ai_fam_sock == AF_UNSPEC)
@@ -428,9 +429,9 @@ int main(int argc, char *argv[])
         if (sigsetjmp(toplevel, 1) != 0)
             exit(EX_UNAVAILABLE);
 
-        (*c->handler) (pargc, pargv);
+        ret = (*c->handler) (pargc, pargv);
         xfree(splitbuf);
-        exit(0);
+        exit(ret);
     }
 #ifdef WITH_READLINE
 #ifdef HAVE_READLINE_HISTORY_H
@@ -449,8 +450,11 @@ static char *hostname;
 
 /* Called when a command is incomplete; modifies
    the global variable "line" */
-static void getmoreargs(const char *partial, const char *mprompt)
+static bool getmoreargs(const char *partial, const char *mprompt)
 {
+    if (iscmd)
+        return false;
+
 #ifdef WITH_READLINE
     char *eline;
     int len, elen;
@@ -483,21 +487,23 @@ static void getmoreargs(const char *partial, const char *mprompt)
         if (feof(stdin))
             exit(0);            /* EOF */
 #endif
+    return true;
 }
 
-static void setpeer(int argc, char *argv[])
+static int setpeer(int argc, char *argv[])
 {
     int err;
 
     if (argc < 2) {
-        getmoreargs("connect ", "(to) ");
+        if (!getmoreargs("connect ", "(to) "))
+            return EX_USAGE;
         margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
     if ((argc < 2) || (argc > 3)) {
         printf("usage: %s host-name [port]\n", argv[0]);
-        return;
+        return EX_USAGE;
     }
 
     peeraddr.sa.sa_family = ai_fam;
@@ -506,7 +512,7 @@ static void setpeer(int argc, char *argv[])
         printf("Error: %s\n", gai_strerror(err));
         printf("%s: unknown host\n", argv[1]);
         connected = false;
-        return;
+        return EX_NOHOST;
     }
     ai_fam = peeraddr.sa.sa_family;
     if (f == -1) { /* socket not open */
@@ -543,7 +549,7 @@ static void setpeer(int argc, char *argv[])
             if (*ep || myport > 65535UL) {
                 printf("%s: bad port number\n", argv[2]);
                 connected = false;
-                return;
+                return EX_USAGE;
             }
             port = htons((uint16_t) myport);
         }
@@ -560,16 +566,17 @@ static void setpeer(int argc, char *argv[])
                hostname, tp, (unsigned int)ntohs(port));
     }
     connected = true;
+    return 0;
 }
 
-static void modecmd(int argc, char *argv[])
+static int modecmd(int argc, char *argv[])
 {
     const struct modes *p;
     const char *sep;
 
     if (argc < 2) {
         printf("Using %s mode to transfer files.\n", mode->m_mode);
-        return;
+        return 0;
     }
     if (argc == 2) {
         for (p = modes; p->m_name; p++)
@@ -577,7 +584,7 @@ static void modecmd(int argc, char *argv[])
                 break;
         if (p->m_name) {
             settftpmode(p);
-            return;
+            return 0;
         }
         printf("%s: unknown mode\n", argv[1]);
         /* drop through and print usage message */
@@ -591,21 +598,23 @@ static void modecmd(int argc, char *argv[])
             sep = " | ";
     }
     printf(" ]\n");
-    return;
+    return EX_USAGE;
 }
 
-static void setbinary(int argc, char *argv[])
+static int setbinary(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     settftpmode(MODE_OCTET);
+    return 0;
 }
 
-static void setascii(int argc, char *argv[])
+static int setascii(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     settftpmode(MODE_NETASCII);
+    return 0;
 }
 
 static void settftpmode(const struct modes *newmode)
@@ -618,7 +627,7 @@ static void settftpmode(const struct modes *newmode)
 /*
  * Send file(s).
  */
-static void put(int argc, char *argv[])
+static int put(int argc, char *argv[])
 {
     int fd;
     int n, err;
@@ -626,21 +635,22 @@ static void put(int argc, char *argv[])
     char *targ;
 
     if (argc < 2) {
-        getmoreargs("send ", "(file) ");
+        if (!getmoreargs("send ", "(file) "))
+            return EX_USAGE;
         margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
     if (argc < 2) {
         putusage(argv[0]);
-        return;
+        return EX_USAGE;
     }
     targ = argv[argc - 1];
     if (!literal && strchr(argv[argc - 1], ':')) {
         for (n = 1; n < argc - 1; n++)
             if (strchr(argv[n], ':')) {
                 putusage(argv[0]);
-                return;
+                return EX_USAGE;
             }
         cp = argv[argc - 1];
         targ = strchr(cp, ':');
@@ -651,14 +661,14 @@ static void put(int argc, char *argv[])
             printf("Error: %s\n", gai_strerror(err));
             printf("%s: unknown host\n", argv[1]);
             connected = false;
-            return;
+            return EX_NOHOST;
         }
         ai_fam = peeraddr.sa.sa_family;
         connected = true;
     }
     if (!connected) {
         printf("No target machine specified.\n");
-        return;
+        return EX_USAGE;
     }
     if (argc < 4) {
         cp = argc == 2 ? tail(targ) : argv[1];
@@ -666,17 +676,17 @@ static void put(int argc, char *argv[])
         if (fd < 0) {
             fprintf(stderr, "tftp: ");
             perror(cp);
-            return;
+            return EX_OSERR;
         }
         if (verbose)
             printf("putting %s to %s:%s [%s]\n",
                    cp, hostname, targ, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_sendfile(fd, targ, mode->m_mode, windowsize);
-        return;
+        return tftp_sendfile(fd, targ, mode->m_mode, windowsize);
     }
     /* this assumes the target is a directory */
     /* on a remote unix system.  hmmmm.  */
+    err = 0;
     for (n = 1; n < argc - 1; n++) {
         const char *base = tail(argv[n]);
         char *remotepath = xmalloc(strlen(targ) + 1 + strlen(base) + 1);
@@ -687,15 +697,20 @@ static void put(int argc, char *argv[])
             fprintf(stderr, "tftp: ");
             perror(argv[n]);
             free(remotepath);
+            if (!err)
+                err = EX_OSERR;
             continue;
         }
         if (verbose)
             printf("putting %s to %s:%s [%s]\n",
                    argv[n], hostname, remotepath, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_sendfile(fd, remotepath, mode->m_mode, windowsize);
+        n = tftp_sendfile(fd, remotepath, mode->m_mode, windowsize);
+        if (!err)
+            err = n;
         free(remotepath);
     }
+    return err;
 }
 
 static void putusage(const char *s)
@@ -707,43 +722,47 @@ static void putusage(const char *s)
 /*
  * Receive file(s).
  */
-static void get(int argc, char *argv[])
+static int get(int argc, char *argv[])
 {
     int fd;
-    int n;
+    int n, err;
     char *cp;
     char *src;
 
     if (argc < 2) {
-        getmoreargs("get ", "(files) ");
+        if (!getmoreargs("get ", "(files) "))
+            return EX_USAGE;
         margc = makeargv(line, margv);
         argc = margc;
         argv = margv;
     }
     if (argc < 2) {
         getusage(argv[0]);
-        return;
+        return EX_USAGE;
     }
     if (!connected) {
         for (n = 1; n < argc; n++)
             if (literal || strchr(argv[n], ':') == 0) {
                 getusage(argv[0]);
-                return;
+                return EX_USAGE;
             }
     }
+    err = 0;
     for (n = 1; n < argc; n++) {
         src = strchr(argv[n], ':');
         if (literal || src == NULL)
             src = argv[n];
         else {
-            int err;
+            int resolve_error;
 
             *src++ = 0;
             peeraddr.sa.sa_family = ai_fam;
-            err = set_sock_addr(argv[n], &peeraddr, &hostname, false);
-            if (err) {
-                printf("Warning: %s\n", gai_strerror(err));
+            resolve_error = set_sock_addr(argv[n], &peeraddr, &hostname, false);
+            if (resolve_error) {
+                printf("Warning: %s\n", gai_strerror(resolve_error));
                 printf("%s: unknown host\n", argv[1]);
+                if (!err)
+                    err = EX_NOHOST;
                 continue;
             }
             ai_fam = peeraddr.sa.sa_family;
@@ -756,13 +775,13 @@ static void get(int argc, char *argv[])
             if (fd < 0) {
                 fprintf(stderr, "tftp: ");
                 perror(cp);
-                return;
+                return EX_OSERR;
             }
             if (verbose)
                 printf("getting from %s:%s to %s [%s]\n",
                        hostname, src, cp, mode->m_mode);
             sa_set_port(&peeraddr, port);
-            tftp_recvfile(fd, src, mode->m_mode, windowsize);
+            err = tftp_recvfile(fd, src, mode->m_mode, windowsize);
             break;
         }
         cp = tail(src);         /* new .. jdg */
@@ -771,14 +790,19 @@ static void get(int argc, char *argv[])
         if (fd < 0) {
             fprintf(stderr, "tftp: ");
             perror(cp);
+            if (!err)
+                err = EX_OSERR;
             continue;
         }
         if (verbose)
             printf("getting from %s:%s to %s [%s]\n",
                    hostname, src, cp, mode->m_mode);
         sa_set_port(&peeraddr, port);
-        tftp_recvfile(fd, src, mode->m_mode, windowsize);
+        n = tftp_recvfile(fd, src, mode->m_mode, windowsize);
+        if (!err)
+            err = n;
     }
+    return err;
 }
 
 static void getusage(const char *s)
@@ -790,91 +814,104 @@ static void getusage(const char *s)
 int rexmtval = TIMEOUT;
 int maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
 
-static void setrexmt(int argc, char *argv[])
+static int setrexmt(int argc, char *argv[])
 {
     int t;
 
     if (argc < 2) {
-        getmoreargs("rexmt-timeout ", "(value) ");
+        if (!getmoreargs("rexmt-timeout ", "(value) "))
+            return EX_USAGE;
         argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
         printf("usage: %s value\n", argv[0]);
-        return;
+        return EX_USAGE;
     }
     t = atoi(argv[1]);
-    if (t < 1)
+    if (t < 1) {
         printf("%s: bad value\n", argv[1]);
-    else {
+        return EX_USAGE;
+    } else {
         rexmtval = t;
         maxtimeout = rexmtval * TIMEOUT_LIMIT;
     }
+    return 0;
 }
 
-static void settimeout(int argc, char *argv[])
+static int settimeout(int argc, char *argv[])
 {
     int t;
 
     if (argc < 2) {
-        getmoreargs("maximum-timeout ", "(value) ");
+        if (!getmoreargs("maximum-timeout ", "(value) "))
+            return EX_USAGE;
         argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
         printf("usage: %s value\n", argv[0]);
-        return;
+        return EX_USAGE;
     }
     t = atoi(argv[1]);
-    if (t < 1)
+    if (t < 1) {
         printf("%s: bad value\n", argv[1]);
-    else
+        return EX_USAGE;
+    } else
         maxtimeout = t;
+    return 0;
 }
 
-static void setblocksize(int argc, char *argv[])
+static int setblocksize(int argc, char *argv[])
 {
     if (argc < 2) {
-        getmoreargs("blocksize ", "(size) ");
+        if (!getmoreargs("blocksize ", "(size) "))
+            return EX_USAGE;
         argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
         printf("usage: %s size\n", argv[0]);
-        return;
+        return EX_USAGE;
     }
     if (!parse_uint_range(argv[1], 8, MAX_SEGSIZE, &blocksize)) {
         printf("%s: bad block size (valid range is 8-%d)\n",
                argv[1], MAX_SEGSIZE);
+        return EX_USAGE;
     }
+    return 0;
 }
 
-static void setwindowsize(int argc, char *argv[])
+static int setwindowsize(int argc, char *argv[])
 {
     if (argc < 2) {
-        getmoreargs("windowsize ", "(size) ");
+        if (!getmoreargs("windowsize ", "(size) "))
+            return EX_USAGE;
         argc = margc = makeargv(line, margv);
         argv = margv;
     }
     if (argc != 2) {
         printf("usage: %s size\n", argv[0]);
-        return;
+        return EX_USAGE;
     }
     if (!parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE, &windowsize)) {
         printf("%s: bad window size (valid range is 1-%u)\n",
                argv[1], TFTP_MAX_WINDOWSIZE);
+        return EX_USAGE;
     }
+    return 0;
 }
 
-static void setliteral(int argc, char *argv[])
+static int setliteral(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     literal = !literal;
     printf("Literal mode %s.\n", literal ? "on" : "off");
+    return 0;
 }
 
-static void status(int argc, char *argv[])
+static int status(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -889,6 +926,7 @@ static void status(int argc, char *argv[])
            rexmtval, maxtimeout);
     printf("Blocksize: %u, windowsize: %u\n", blocksize,
            windowsize ? windowsize : 1);
+    return 0;
 }
 
 static void intr(int sig)
@@ -958,7 +996,7 @@ static void command(void)
             printf("Error: %s command: %s\n", errtype, margv[0]);
             continue;
         }
-        (*c->handler) (margc, margv);
+        (void)(*c->handler) (margc, margv);
     }
 }
 
@@ -1031,7 +1069,7 @@ static int makeargv(char *str, char **argp)
     return argc;
 }
 
-static void quit(int argc, char *argv[])
+static int quit(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
@@ -1041,7 +1079,7 @@ static void quit(int argc, char *argv[])
 /*
  * Help command.
  */
-static void help(int argc, char *argv[])
+static int help(int argc, char *argv[])
 {
     const struct cmd *c;
 
@@ -1051,7 +1089,7 @@ static void help(int argc, char *argv[])
         printf("Commands may be abbreviated.  Commands are:\n\n");
         for (c = cmdtab; c->name; c++)
             printf("%-*s\t%s\n", (int)HELPINDENT, c->name, c->help);
-        return;
+        return 0;
     }
     while (--argc > 0) {
         const char *errtype;
@@ -1063,18 +1101,20 @@ static void help(int argc, char *argv[])
         else
             printf("%s\n", c->help);
     }
+    return 0;
 }
 
-static void settrace(int argc, char *argv[])
+static int settrace(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
 
     trace = !trace;
     printf("Packet tracing %s.\n", trace ? "on" : "off");
+    return 0;
 }
 
-static void set_verbosity(const char *to, bool startup)
+static int set_verbosity(const char *to, bool startup)
 {
     const char *name;
 
@@ -1090,7 +1130,7 @@ static void set_verbosity(const char *to, bool startup)
                 exit(EX_USAGE);
             } else {
                 printf("Invalid verbosity level: %s\n", to);
-                return;
+                return EX_USAGE;
             }
         }
     } else {
@@ -1111,10 +1151,11 @@ static void set_verbosity(const char *to, bool startup)
 
     if (!startup)
         printf("Verbosity set to level %d (%s).\n", verbose, name);
+    return 0;
 }
 
-static void setverbose(int argc, char *argv[])
+static int setverbose(int argc, char *argv[])
 {
     (void)argc;
-    set_verbosity(argv[1], false);
+    return set_verbosity(argv[1], false);
 }
