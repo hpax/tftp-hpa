@@ -175,8 +175,7 @@ static size_t null_macrosub(char macro, const char **macrodata)
 static size_t xsmemcpy(struct xform_state *xs, const char *from, size_t bytes)
 {
     if (xs->out) {
-        memcpy(xs->out, from, bytes);
-        xs->out += bytes;
+        xs->out = mempcpy(xs->out, from, bytes);
         *xs->out = '\0';         /* Enforce null termination */
     }
     xs->len += bytes;

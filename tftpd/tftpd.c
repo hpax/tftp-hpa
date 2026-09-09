@@ -1368,10 +1368,8 @@ static void negotiate_windowsize(char **ap)
         exit(0);
     }
 
-    memcpy(*ap, "windowsize", optlen);
-    *ap += optlen;
-    memcpy(*ap, retbuf, retlen + 1);
-    *ap += retlen + 1;
+    *ap = mempcpy(*ap, "windowsize", optlen);
+    *ap = mempcpy(*ap, retbuf, retlen + 1);
 }
 
 /*
@@ -1499,10 +1497,8 @@ static void do_opt(const char *opt, const char *val, char **ap)
                     exit(0);
                 }
 
-		memcpy(p, opt, optlen+1);
-		p += optlen+1;
-		memcpy(p, retbuf, retlen+1);
-		p += retlen+1;
+		p = mempcpy(p, opt, optlen+1);
+		p = mempcpy(p, retbuf, retlen+1);
             }
             break;
         }

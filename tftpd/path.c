@@ -262,18 +262,14 @@ char *build_path(const char *prefix, const char * const *dirs)
 
     q = path = xmalloc(size);
     if (prefix_len) {
-        memcpy(q, prefix, prefix_len);
-        q += prefix_len;
+        q = mempcpy(q, prefix, prefix_len);
     }
 
     for (dp = dirs; *dp; dp++) {
-        size_t len = strlen(*dp);
         *q++ = '/';
-        memcpy(q, *dp, len);
-        q += len;
+        q = stpcpy(q, *dp);
     }
 
-    *q = '\0';
     return path;
 }
 

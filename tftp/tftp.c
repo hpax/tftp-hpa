@@ -490,21 +490,15 @@ makerequest(int request, const char *name,
 
     tp->th_opcode = htons((uint16_t) request);
     cp = (char *)&(tp->th_stuff);
-    memcpy(cp, name, namelen + 1);
-    cp += namelen + 1;
-    memcpy(cp, mode, modelen + 1);
-    cp += modelen + 1;
+    cp = mempcpy(cp, name, namelen + 1);
+    cp = mempcpy(cp, mode, modelen + 1);
     if (requested_block != SEGSIZE) {
-        memcpy(cp, "blksize", sizeof("blksize"));
-        cp += sizeof("blksize");
-        memcpy(cp, block_value, strlen(block_value) + 1);
-        cp += strlen(block_value) + 1;
+        cp = mempcpy(cp, "blksize", sizeof("blksize"));
+        cp = mempcpy(cp, block_value, strlen(block_value) + 1);
     }
     if (requested_window) {
-        memcpy(cp, "windowsize", sizeof("windowsize"));
-        cp += sizeof("windowsize");
-        memcpy(cp, window_value, strlen(window_value) + 1);
-        cp += strlen(window_value) + 1;
+        cp = mempcpy(cp, "windowsize", sizeof("windowsize"));
+        cp = mempcpy(cp, window_value, strlen(window_value) + 1);
     }
     return (cp - (char *)tp);
 }
