@@ -1663,7 +1663,7 @@ static const char *rewrite_access(const struct formats *pf,
         }
     }
 
-#ifdef REGEX
+#ifdef WITH_REGEX
     if (rewrite_rules) {
         filename = rewrite_string(pf, filename, rewrite_rules, mode, af,
                                   rewrite_macros, msg);
