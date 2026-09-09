@@ -1701,6 +1701,7 @@ static int validate_access(char *filename, int mode,
 
     if (mode == RRQ) {
         if (!unixperms && (stbuf.st_mode & (S_IREAD >> 6)) == 0) {
+            close(fd);
             *errmsg = "File must have global read permissions";
             return (EACCESS);
         }
@@ -1710,6 +1711,7 @@ static int validate_access(char *filename, int mode,
     } else {
         if (!unixperms) {
             if ((stbuf.st_mode & (S_IWRITE >> 6)) == 0) {
+                close(fd);
                 *errmsg = "File must have global write permissions";
                 return (EACCESS);
             }
@@ -1718,6 +1720,7 @@ static int validate_access(char *filename, int mode,
 #ifdef HAVE_FTRUNCATE
 	/* We didn't get to truncate the file at open() time */
 	if (ftruncate(fd, (off_t) 0)) {
+	  close(fd);
 	  *errmsg = "Cannot reset file size";
 	  return (EACCESS);
 	}
