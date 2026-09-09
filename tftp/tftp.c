@@ -123,8 +123,8 @@ static const struct tftp_xfer_ops client_xfer_ops = {
 void tftp_sendfile(int fd, const char *name, const char *mode,
                    unsigned int requested_window)
 {
+    void * volatile response;
     struct tftphdr *ap;
-    char *response;
     const struct tftphdr *rp;
     union sock_addr from;
     FILE *file = NULL;
