@@ -390,6 +390,8 @@ static const struct option long_options[] = {
     { "user",        1, NULL, 'u' },
     { "umask",       1, NULL, 'U' },
     { "refuse",      1, NULL, 'r' },
+    { "reject",      1, NULL, 'r' },
+    { "refuse-all",  0, NULL, OPT_REJECT_ALL },
     { "reject-all",  0, NULL, OPT_REJECT_ALL },
     { "timeout",     1, NULL, 't' },
     { "retransmit",  1, NULL, 'T' },

@@ -226,10 +226,14 @@ option
 .I value
 times.
 .TP
-\fB\-r\fP, \fB\-\-refuse\fP \fItftp-option\fP
+\fB\-r\fP, \fB\-\-refuse\fP, \fB\-\-reject\fP \fItftp-option\fP
 Indicate that a specific RFC 2347 TFTP option should never be
 accepted, even if requested by the client. This can be used to work
 around broken clients.
+.TP
+\fB\-\-refuse\-all\fP, \fB\-\-reject-all\fP
+Disable all RFC 2347 options.  Requests containing options proceed
+directly to the normal TFTP data stage without an option acknowledgment.
 .TP
 \fB\-B\fP, \fB\-\-blocksize\fP \fImax-block-size\fP
 Specifies the maximum permitted block size.  The permitted range for
@@ -354,10 +358,12 @@ example, some TFTP clients have been found to request the
 .B blksize
 option, but crash with an error if they actually get the option
 accepted by the server.
-.TP
-\fB\-\-reject-all\fP
-Disable all RFC 2347 options.  Requests containing options proceed
-directly to the normal TFTP data stage without an option acknowledgment.
+.PP
+The
+.B \-\-refuse-all
+option disables
+.I all
+TFTP options, and thus the server will never return an OACK packet.
 
 .SH "FILENAME REMAPPING"
 The
