@@ -14,8 +14,6 @@
 
 #include "config.h"
 
-extern int errno;
-
 const char *inet_ntop(int af, const void *src,
                       char *dst, socklen_t cnt)
 {
