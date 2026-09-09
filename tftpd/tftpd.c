@@ -1081,8 +1081,10 @@ int main(int argc, char **argv)
 static char *rewrite_access(const struct formats *,
 			    char *, int, int, const char **);
 static int validate_access(char *, int, const struct formats *, const char **);
-static void tftp_sendfile(const struct formats *, struct tftphdr *, int);
-static void tftp_recvfile(const struct formats *, struct tftphdr *, int);
+static void tftp_sendfile(const struct formats *, struct tftphdr *, int,
+                          const char *);
+static void tftp_recvfile(const struct formats *, struct tftphdr *, int,
+                          const char *);
 
 static const struct formats formats[] = {
     {
@@ -1101,7 +1103,7 @@ static int tftp(struct tftphdr *tp, int size)
     char *cp, *end;
     int argn, ecode;
     const struct formats *pf = NULL;
-    char *origfilename;
+    char *origfilename, *request_filename;
     char *filename, *mode = NULL;
     const char *errmsgptr;
     uint16_t tp_opcode = ntohs(tp->th_opcode);
@@ -1174,6 +1176,9 @@ static int tftp(struct tftphdr *tp, int size)
 	    if (!file) {
 		ecode =
 		    (*pf->f_validate) (filename, tp_opcode, pf, &errmsgptr);
+		if (ecode == ENOTFOUND)
+		    tftpd_log(LOG_NOTICE, "client %s: file not found: %s",
+			      tmp_p, filename);
 		if (ecode) {
 		    nak(ecode, errmsgptr);
 		    exit(0);
@@ -1195,17 +1200,20 @@ static int tftp(struct tftphdr *tp, int size)
 
     negotiate_windowsize(&ap);
     tftp_set_socket_buffers(peer, segsize, windowsize, tp_opcode == RRQ);
+    request_filename = xstrdup(origfilename);
 
     if (ap != (ackbuf + 2)) {
         if (tp_opcode == WRQ)
-            (*pf->f_recv) (pf, (struct tftphdr *)ackbuf, ap - ackbuf);
+            (*pf->f_recv) (pf, (struct tftphdr *)ackbuf, ap - ackbuf,
+                           request_filename);
         else
-            (*pf->f_send) (pf, (struct tftphdr *)ackbuf, ap - ackbuf);
+            (*pf->f_send) (pf, (struct tftphdr *)ackbuf, ap - ackbuf,
+                           request_filename);
     } else {
         if (tp_opcode == WRQ)
-            (*pf->f_recv) (pf, NULL, 0);
+            (*pf->f_recv) (pf, NULL, 0, request_filename);
         else
-            (*pf->f_send) (pf, NULL, 0);
+            (*pf->f_send) (pf, NULL, 0, request_filename);
     }
     exit(0);                    /* Request completed */
 }
@@ -1743,7 +1751,8 @@ static int validate_access(char *filename, int mode,
 /*
  * Send the requested file.
  */
-static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oacklen)
+static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
+                          int oacklen, const char *filename)
 {
     struct tftphdr *ap;         /* ack packet */
     uint16_t ap_opcode, ap_block;
@@ -1817,6 +1826,13 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
         errno = result.error;
         tftpd_log(LOG_WARNING, "tftpd: read(ack): %s", strerror(errno));
         break;
+    case TFTP_XFER_OK:
+        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from), tmpbuf,
+                          INET6_ADDRSTRLEN);
+        if (!tmp_p)
+            tmp_p = "???";
+        tftpd_log(LOG_NOTICE, "client %s: finished %s", tmp_p, filename);
+        break;
     default:
         break;
     }
@@ -1832,7 +1848,8 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap, int oac
  * Receive a file.
  */
 static void tftp_recvfile(const struct formats *pf,
-			  struct tftphdr *oack, int oacklen)
+			  struct tftphdr *oack, int oacklen,
+                          const char *filename)
 {
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;
@@ -1888,6 +1905,13 @@ static void tftp_recvfile(const struct formats *pf,
     case TFTP_XFER_RECV_ERROR:
         errno = result.error;
         tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
+        break;
+    case TFTP_XFER_OK:
+        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from), tmpbuf,
+                          INET6_ADDRSTRLEN);
+        if (!tmp_p)
+            tmp_p = "???";
+        tftpd_log(LOG_NOTICE, "client %s: finished %s", tmp_p, filename);
         break;
     default:
         break;
