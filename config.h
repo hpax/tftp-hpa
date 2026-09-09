@@ -290,6 +290,16 @@ typedef int socklen_t;
 #define sigjmp_buf jmp_buf
 #endif
 
+#ifndef HAVE_STPCPY
+char *stpcpy(char *dst, const char *src); /* In lib/stpcpy.c */
+#endif
+#ifndef HAVE_MEMPCPY
+static inline void *mempcpy(void *dst, const void *src, size_t n)
+{
+    return memcpy(dst, src, n) + n;
+}
+#endif
+
 /* How do we annotate unused data items? */
 
 #ifndef UNUSED

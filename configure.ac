@@ -204,6 +204,9 @@ AC_SEARCH_LIBS(inet_aton, [nsl resolv], ,[AC_MSG_ERROR(inet_aton not found)])
 PA_SEARCH_LIBS_AND_ADD(daemon)
 AC_SEARCH_LIBS(dup2, , ,[AC_MSG_ERROR(dup2 not found; the bundled ersatz dup2() implementation has been removed as obsolete)])
 
+PA_SEARCH_LIBS_AND_ADD(stpcpy, , stpcpy)
+AC_CHECK_FUNCS(mempcpy)
+
 AS_IF([$XTRA], [XTRALIBS="$OBJROOT/lib/libxtra.a $XTRALIBS"])
 
 dnl
