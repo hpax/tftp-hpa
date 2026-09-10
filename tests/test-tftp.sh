@@ -14,6 +14,7 @@ TFTP="${2:-${REPO_ROOT}/tftp/tftp}"
 PORT="${3:-6969}"
 PORTRANGE="${4:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
+ANYADDR="${:-0}"
 TESTROOT=$(mktemp -d)
 TEST_DIR="$TESTROOT/client"
 SERVER_DIR="$TESTROOT/server"
@@ -97,17 +98,23 @@ check_binaries() {
 
 # Start the TFTP server
 start_server() {
-    local addrs=$(echo "$LOCALHOSTS" | \
-		      sed -E -e 's/([^[:space:]]*:[^[:space:]]*)/[\1]/g' \
-			  -e "s/([^[:space:]]+)/-a \\1:$PORT/g")
-
     print_info "Starting tftpd..."
 
     # Start tftpd in the background, listening on localhost
     # Run in standalone mode, serve from SERVER_DIR
     local -a TFTPD_CMD=("$TFTPD" --stderr -L -p
-			--port-range $PORTRANGE -c $addrs
-			-/ --path-prefix "$SERVER_DIR" /)
+			--port-range $PORTRANGE)
+    if [ $ANYADDR -ne 0 ]; then
+	if [ $PORT -ne 69 ]; then
+	    TFTPD_CMD+=(-a :$PORT)
+	fi
+    else
+	local addrs=$(echo "$LOCALHOSTS" | \
+			  sed -E -e 's/([^[:space:]]*:[^[:space:]]*)/[\1]/g' \
+			      -e "s/([^[:space:]]+)/-a \\1:$PORT/g")
+	TFTPD_CMD+=($addrs)
+    fi
+    TFTPD_CMD+=(-/ --path-prefix "$SERVER_DIR" /)
     print_info "${TFTPD_CMD[*]}"
     "${TFTPD_CMD[@]}" &
     TFTPD_PID=$!
