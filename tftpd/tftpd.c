@@ -37,9 +37,9 @@
 #endif
 
 #ifdef HAVE_IPV6
-static int ai_fam = AF_UNSPEC;
+static sa_family_t ai_fam = AF_UNSPEC;
 #else
-static int ai_fam = AF_INET;
+static sa_family_t ai_fam = AF_INET;
 #endif
 
 #define	TIMEOUT 1000000         /* Default timeout (us) */
@@ -80,10 +80,8 @@ static uintmax_t max_windowbytes = MAX_WINDOWBYTES;
 static unsigned int windowsize = 1;
 static uintmax_t requested_windowsize;
 
-static char tmpbuf[INET6_ADDRSTRLEN];
-static const char *tmp_p;
-
 static union sock_addr from;
+static const char *from_str = "<client>";
 static off_t tsize;
 static bool tsize_ok;
 
@@ -189,7 +187,10 @@ static void tftpd_log_stderr(int priority, const char *fmt, ...)
 {
     va_list ap;
 
-    fputs(prio_name(priority), stderr);
+    fprintf(stderr, "%s: %s",
+            _progname ? _progname : "tftpd",
+            prio_name(priority));
+
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
@@ -1019,6 +1020,9 @@ int main(int argc, char **argv)
     /* Close file descriptors we don't need */
     close_listen_set();
 
+    /* Convert the client address to a string */
+    from_str = net_address(&from.sa, sizeof from);
+
     /* Get a socket.  This has to be done before the chroot(), since
        some systems require access to /dev to create a socket. */
 
@@ -1098,7 +1102,7 @@ int main(int argc, char **argv)
         exit(EX_IOERR);
     }
 
-    if (connect(peer, &from.sa, SOCKLEN(&from)) < 0) {
+    if (connect(peer, &from.sa, sizeof from) < 0) {
         tftpd_log(LOG_ERR, "connect: %s", strerror(errno));
         exit(EX_IOERR);
     }
@@ -1187,23 +1191,17 @@ static int tftp(struct tftphdr *tp, int size)
                 exit(0);
             }
             if (verbosity >= 1) {
-                tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
-                                  tmpbuf, INET6_ADDRSTRLEN);
-                if (!tmp_p) {
-                    tmp_p = tmpbuf;
-                    strcpy(tmpbuf, "???");
-                }
                 if (filename == origfilename
                     || !strcmp(filename, origfilename))
                     tftpd_log(LOG_NOTICE, "%s from %s filename %s",
-                           tp_opcode == WRQ ? "WRQ" : "RRQ",
-                           tmp_p, filename);
+                              tp_opcode == WRQ ? "WRQ" : "RRQ",
+                              from_str, filename);
                 else
                     tftpd_log(LOG_NOTICE,
                            "%s from %s filename %s remapped to %s",
-                           tp_opcode == WRQ ? "WRQ" : "RRQ",
-                           tmp_p, origfilename,
-                           filename);
+                              tp_opcode == WRQ ? "WRQ" : "RRQ",
+                              from_str, origfilename,
+                              filename);
             }
 	    /*
 	     * If "file" is already set, then a file was already validated
@@ -1214,7 +1212,7 @@ static int tftp(struct tftphdr *tp, int size)
 		    (*pf->f_validate) (filename, tp_opcode, pf, &errmsgptr);
 		if (ecode == ENOTFOUND)
 		    tftpd_log(LOG_NOTICE, "client %s: file not found: %s",
-			      tmp_p, filename);
+			      from_str, filename);
 		if (ecode) {
 		    nak(ecode, errmsgptr);
 		    exit(0);
@@ -1598,7 +1596,7 @@ static void rewrite_test(FILE *tf)
     static const char phony_ip4_addr[4] = { 192, 0, 2, 34 };
     char *line = xmalloc(MAX_SEGSIZE + 1);
     int mode = cancreate ? WRQ : RRQ;
-    int af = ai_fam;
+    sa_family_t af = ai_fam;
 
     memset(&from, 0, sizeof from);
 
@@ -1614,6 +1612,7 @@ static void rewrite_test(FILE *tf)
         break;
     }
     from.sa.sa_family = af;
+    from_str = net_address(&from.sa, sizeof from);
 
     while (fgets(line, MAX_SEGSIZE + 1, tf)) {
         const char *msg;
@@ -1737,10 +1736,12 @@ static int validate_access(const char *filename, int mode,
     wmode |= O_TRUNC;		/* This really sucks on a dupe */
 #endif
 
+    tftpd_log(LOG_DEBUG, "%s: final filename: %s", from_str, filename);
+
     fd = open(filename, mode == RRQ ? rmode : wmode, 0666);
     if (fd < 0)
         fd = -errno;
-    if (!secure)
+    if (fnbuf)
         free(fnbuf);
     if (fd < 0)
         return fd;
@@ -1865,18 +1866,14 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: write: %s", strerror(errno));
+        tftpd_log(LOG_WARNING, "%s: write: %s", from_str, strerror(errno));
         break;
     case TFTP_XFER_RECV_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: read(ack): %s", strerror(errno));
+        tftpd_log(LOG_WARNING, "%s: read(ack): %s", from_str, strerror(errno));
         break;
     case TFTP_XFER_OK:
-        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from), tmpbuf,
-                          INET6_ADDRSTRLEN);
-        if (!tmp_p)
-            tmp_p = "???";
-        tftpd_log(LOG_NOTICE, "client %s: finished %s", tmp_p, filename);
+        tftpd_log(LOG_NOTICE, "%s: read completed: %s", from_str, filename);
         break;
     default:
         break;
@@ -1945,18 +1942,14 @@ static void tftp_recvfile(const struct formats *pf,
         break;
     case TFTP_XFER_SEND_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: write(ack): %s", strerror(errno));
+        tftpd_log(LOG_WARNING, "%s: write(ack): %s", from_str, strerror(errno));
         break;
     case TFTP_XFER_RECV_ERROR:
         errno = result.error;
-        tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
+        tftpd_log(LOG_WARNING, "%s: read: %s", from_str, strerror(errno));
         break;
     case TFTP_XFER_OK:
-        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from), tmpbuf,
-                          INET6_ADDRSTRLEN);
-        if (!tmp_p)
-            tmp_p = "???";
-        tftpd_log(LOG_NOTICE, "client %s: finished %s", tmp_p, filename);
+        tftpd_log(LOG_NOTICE, "%s: write completed: %s", from_str, filename);
         break;
     default:
         break;
@@ -2040,16 +2033,10 @@ static void nak(int error, const char *msg)
     length += 4;                /* Add space for header */
 
     if (verbosity >= 2) {
-        tmp_p = inet_ntop(from.sa.sa_family, SOCKADDR_P(&from),
-                          tmpbuf, INET6_ADDRSTRLEN);
-        if (!tmp_p) {
-            tmp_p = tmpbuf;
-            strcpy(tmpbuf, "???");
-        }
-        tftpd_log(LOG_INFO, "sending NAK (%d, %s) to %s",
-               error, tp->th_msg, tmp_p);
+        tftpd_log(LOG_INFO, "%s: sending NAK (%d, %s)",
+                  from_str, error, tp->th_msg);
     }
 
     if (send(peer, buf, length, 0) != length)
-        tftpd_log(LOG_WARNING, "nak: %s", strerror(errno));
+        tftpd_log(LOG_WARNING, "%s: nak: %s", from_str, strerror(errno));
 }

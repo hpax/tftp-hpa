@@ -26,7 +26,7 @@ extern log_func tftpd_log;
 void set_signal(int, void (*)(int), int);
 
 extern const char *default_service;
-int listen_to(struct pollset *set, const char *name, int ai_fam);
+int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam);
 
 extern int verbosity;
 

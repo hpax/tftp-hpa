@@ -16,13 +16,13 @@ PORTRANGE="${4:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
 ANYADDR="${:-0}"
 TESTROOT=$(mktemp -d)
-TEST_DIR="$TESTROOT/client"
-SERVER_DIR="$TESTROOT/server"
+SERVER_DIR="$TESTROOT"
+FILES_DIR="$TESTROOT/files"
+DL_DIR="$TESTROOT/download"
+UL_DIR="$TESTROOT/upload"
 PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
 TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
 TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-199 512 1468 9001}"
-
-mkdir -p "$TEST_DIR" "$SERVER_DIR"
 
 trap 'cleanup' EXIT INT TERM
 
@@ -102,8 +102,13 @@ start_server() {
 
     # Start tftpd in the background, listening on localhost
     # Run in standalone mode, serve from SERVER_DIR
-    local -a TFTPD_CMD=("$TFTPD" --stderr -L -p
-			--port-range $PORTRANGE)
+    local -a TFTPD_CMD=()
+
+    if [ -n "$STRACE_LOG" ]; then
+	TFTPD_CMD+=(strace -o "$STRACE_LOG" -f)
+    fi
+
+    TFTPD_CMD+=("$TFTPD" --stderr -vv -L -p --port-range $PORTRANGE)
     if [ $ANYADDR -ne 0 ]; then
 	if [ $PORT -ne 69 ]; then
 	    TFTPD_CMD+=(-a :$PORT)
@@ -114,7 +119,7 @@ start_server() {
 			      -e "s/([^[:space:]]+)/-a \\1:$PORT/g")
 	TFTPD_CMD+=($addrs)
     fi
-    TFTPD_CMD+=(-/ --path-prefix "$SERVER_DIR" /)
+    TFTPD_CMD+=(-c -/ --path-prefix "$SERVER_DIR" /files /upload)
     print_info "${TFTPD_CMD[*]}"
     "${TFTPD_CMD[@]}" &
     TFTPD_PID=$!
@@ -155,17 +160,19 @@ declare -a testfiles
 create_test_files() {
     print_info "Creating test files..."
 
+    mkdir -p "$FILES_DIR" "$UL_DIR" "$DL_DIR"
+
     # Small text file
-    echo "This is a small test file for TFTP." > "$TEST_DIR/small.txt"
+    echo "This is a small test file for TFTP." > "$FILES_DIR/small.txt"
 
     # Medium binary-like file
-    dd if=/dev/urandom of="$TEST_DIR/medium.bin" bs=1024 count=10 2>/dev/null
+    dd if=/dev/urandom of="$FILES_DIR/medium.bin" bs=1024 count=10 2>/dev/null
 
     # Exactly one four-block window; exercises the terminating empty block
-    dd if=/dev/urandom of="$TEST_DIR/window-boundary.bin" bs=512 count=4 2>/dev/null
+    dd if=/dev/urandom of="$FILES_DIR/window-boundary.bin" bs=512 count=4 2>/dev/null
 
     # Text file with multiple lines
-    printf "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n" > "$TEST_DIR/multiline.txt"
+    printf "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n" > "$FILES_DIR/multiline.txt"
 
     # CR NUL pairs cross a 512-byte packet and a four-packet window.
     {
@@ -173,21 +180,26 @@ create_test_files() {
 	printf '\r'
 	head -c 1534 /dev/zero | tr '\000' B
 	printf '\rtrailing\r'
-    } > "$TEST_DIR/netascii-boundary.txt"
+    } > "$FILES_DIR/netascii-boundary.txt"
 
     # Sparse ASCII file
-    seq 1 100 > "$TEST_DIR/numbers.txt"
+    seq 1 100 > "$FILES_DIR/numbers.txt"
 
     # Large file (> 65536 blocks)
-    dd if=/dev/urandom of="$TEST_DIR/large.bin" bs=512 count=67890 2>/dev/null
+    dd if=/dev/urandom of="$FILES_DIR/large.bin" bs=512 count=67890 2>/dev/null
 
-    print_success "Created test files in $TEST_DIR"
+    chmod a-w "$FILES_DIR"/*.txt "$FILES_DIR"/*.bin
+
+    print_success "Created test files in $FILES_DIR"
 }
 
 # Test file download (client receives)
 test_download() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
+
+    mkdir -p "$DL_DIR"
+    rm -f "$DL_DIR/$filename"
 
     local mode
     case "$filename" in
@@ -197,17 +209,13 @@ test_download() {
 
     print_info "Testing download: $filename"
 
-    # Copy file to server directory
-    local server_file="$SERVER_DIR/$filename"
-    cp "$TEST_DIR/$filename" "$server_file"
-
     # Download using tftp
-    local download_file="$TEST_DIR/${filename}.downloaded"
+    local download_file="$DL_DIR/$filename"
 
     # Use non-interactive tftp with get command
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" $mode
 		       "$LOCALHOST" "$PORT"
-		       -c get "$filename" "$download_file")
+		       -c get files/"$filename" "$download_file")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
@@ -221,7 +229,7 @@ test_download() {
     fi
 
     # Compare files
-    if ! diff -q "$TEST_DIR/$filename" "$download_file" > /dev/null 2>&1; then
+    if ! cmp -s "$FILES_DIR/$filename" "$DL_DIR/$filename"; then
         print_error "Downloaded file differs from original: $filename"
         return 1
     fi
@@ -234,6 +242,9 @@ test_upload() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
 
+    mkdir -p "$UL_DIR"
+    rm -f "$UL_DIR/$filename"
+
     local mode
     case "$filename" in
 	*.txt) mode=netascii ;;
@@ -242,13 +253,11 @@ test_upload() {
 
     print_info "Testing upload: $filename"
 
-    local server_file="$SERVER_DIR/$filename"
-
     # Use tftp to upload the file
     # The server will write it to SERVER_DIR
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" "$mode"
 		       "$LOCALHOST" "$PORT"
-		       -c put "$TEST_DIR/$filename" "$filename")
+		       -c put "$FILES_DIR/$filename" upload/"$filename")
     print_info "${TFTP_CMD[*]}"
     local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
@@ -256,13 +265,13 @@ test_upload() {
     print_info time = $(difftime $start $end)
 
     # Verify file was uploaded
-    if [ ! -f "$SERVER_DIR/$filename" ]; then
+    if [ ! -f "$UL_DIR/$filename" ]; then
         print_error "Failed to upload $filename"
         return 1
     fi
 
     # Compare files
-    if ! diff -q "$TEST_DIR/$filename" "$SERVER_DIR/$filename" > /dev/null 2>&1; then
+    if ! cmp -s "$FILES_DIR/$filename" "$UL_DIR/$filename"; then
         print_error "Uploaded file differs from original: $filename"
         return 1
     fi
@@ -306,9 +315,6 @@ main() {
 		print_info "Window size: $WINSIZE"
 		print_info "IP address:  $LOCALHOST"
 		print_info "---------------------"
-
-		# Clear test directory of any previously downloaded files
-		rm -f "$TEST_DIR"/*.downloaded
 
 		print_info "Running download tests..."
 		for testfile in "${testfiles[@]}"; do

@@ -68,7 +68,7 @@ static int client_xfer_send(void *vctx, const void *packet, int length)
     if (trace)
         tpacket("sent", packet, length);
     return sendto(f, packet, length, 0, &peeraddr.sa,
-                  SOCKLEN(&peeraddr)) == length ? 0 : -1;
+                  sizeof peeraddr) == length ? 0 : -1;
 }
 
 static int client_xfer_recv(void *vctx, void *packet, int length)
@@ -170,7 +170,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
         (void)sigsetjmp(timeoutbuf, 1);
         if (trace)
             tpacket("sent", ap, size);
-        if (sendto(f, ap, size, 0, &peeraddr.sa, SOCKLEN(&peeraddr)) != size) {
+        if (sendto(f, ap, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
             perror("tftp: sendto");
             err = EX_OSERR;
             goto abort;
@@ -326,7 +326,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
         (void)sigsetjmp(timeoutbuf, 1);
         if (trace)
             tpacket("sent", ap, size);
-        if (sendto(f, ap, size, 0, &peeraddr.sa, SOCKLEN(&peeraddr)) != size) {
+        if (sendto(f, ap, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
             perror("tftp: sendto");
             err = EX_OSERR;
             goto abort;
@@ -614,7 +614,7 @@ static void nak(int error, const char *msg)
     if (trace)
         tpacket("sent", tp, length);
     if (sendto(f, ackbuf, length, 0, &peeraddr.sa,
-               SOCKLEN(&peeraddr)) != length)
+               sizeof peeraddr) != length)
         perror("nak");
 }
 

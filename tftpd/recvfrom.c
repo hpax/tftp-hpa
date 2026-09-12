@@ -171,11 +171,11 @@ static bool address_is_local(const union sock_addr *addr)
     if (sockfd < 0)
         goto err;
 
-    if (bind(sockfd, &sa1.sa, SOCKLEN(&sa1)))
+    if (bind(sockfd, &sa1.sa, sizeof sa1))
         goto err;
 
-    addrlen = SOCKLEN(addr);
-    if (getsockname(sockfd, (struct sockaddr *)&sa2, &addrlen))
+    addrlen = sizeof sa2;
+    if (getsockname(sockfd, &sa2.sa, &addrlen))
         goto err;
 
     if (sa1.sa.sa_family != sa2.sa.sa_family)

@@ -112,7 +112,7 @@ AC_CHECK_TYPES(uint32_t)
 AC_CHECK_TYPES(uint64_t)
 
 AC_CHECK_TYPES(socklen_t)
-
+AC_CHECK_TYPES(sa_family_t)
 
 AC_SEARCH_LIBS(socket, [socket ws2_32 wsock32], ,
  [AC_MSG_ERROR(socket library not found)])

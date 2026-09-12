@@ -19,42 +19,9 @@
 #define AI_IDN 0
 #endif
 
-#ifdef HAVE_IPV6
-#define ADDRLEN INET6_ADDRSTRLEN
-#else
-#define ADDRLEN INET_ADDRSTRLEN
-#endif
-
 const char *default_service = "tftp";
 
-static const char *famname(int ai_fam)
-{
-    switch (ai_fam) {
-    case AF_INET:
-        return "IPv4 ";
-#ifdef HAVE_IPV6
-    case AF_INET6:
-        return "IPv6 ";
-#endif
-    default:
-        return "";
-    }
-}
-
-static char *addrstr(const struct sockaddr *addr)
-{
-    char *addrbuf = xmalloc(ADDRLEN + 6);
-    char *pp;
-    if (!inet_ntop(addr->sa_family, SOCKADDR_P(addr), addrbuf, ADDRLEN))
-        strcpy(addrbuf, "<invalid>");
-
-    pp = strchr(addrbuf, '\0');
-    sprintf(pp, ":%u", ntohs(SOCKPORT(addr)));
-
-    return addrbuf;
-}
-
-int listen_to(struct pollset *set, const char *name, int ai_fam)
+int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam)
 {
     char *ns = xstrdup(name);
     char *np = ns;
@@ -71,8 +38,9 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
 #endif
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = ai_fam;
-    hints.ai_flags  = AI_PASSIVE | AI_IDN;
+    hints.ai_family   = ai_fam;
+    hints.ai_flags    = AI_PASSIVE | AI_IDN;
+    hints.ai_socktype = SOCK_DGRAM;
 
     /* Allow a bracketed hostname (e.g. IPv6 address) */
     if (*np == '[') {
@@ -114,14 +82,19 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
     if (err) {
         tftpd_log(LOG_ERR,
                   "cannot resolve local %sbind address: %s:%s (%s)",
-                  famname(ai_fam), hostname ? hostname : "*",
+                  net_family(ai_fam), hostname ? hostname : "*",
                   service, gai_strerror(err));
         err = ENOENT;
         goto fail;
     }
 
     for (ai = addrs; ai; ai = ai->ai_next) {
+        char *addrstr;
         int fd;
+
+        addrstr = net_address(ai->ai_addr, ai->ai_addrlen);
+        fprintf(stderr, "%s: lookup returned: %s\n", name, addrstr);
+        xfree(addrstr);
 
         if (ai_fam != AF_UNSPEC && ai->ai_family != ai_fam)
             continue;
@@ -133,7 +106,7 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
         if (fd < 0) {
             err = errno;
             tftpd_log(LOG_ERR, "failed to create %ssocket: %s",
-                      famname(ai->ai_family), strerror(err));
+                      net_family(ai->ai_family), strerror(err));
             continue;
         }
 
@@ -148,6 +121,9 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
 #ifdef IPV6_FREEBIND
             setsockint(fd, IPPROTO_IPV6, IPV6_FREEBIND, 1);
 #endif
+#ifdef IPV6_V6ONLY
+            setsockint(fd, IPPROTO_IPV6, IPV6_V6ONLY, 1);
+#endif
             break;
 #endif
         default:
@@ -157,7 +133,7 @@ int listen_to(struct pollset *set, const char *name, int ai_fam)
         if (bind(fd, ai->ai_addr, ai->ai_addrlen)) {
             char *aname;
             err = errno;
-            aname = addrstr(ai->ai_addr);
+            aname = net_address(ai->ai_addr, ai->ai_addrlen);
             tftpd_log(LOG_ERR, "failed to bind to %s: %s",
                       aname, strerror(err));
             xfree(aname);

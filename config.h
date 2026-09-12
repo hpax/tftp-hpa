@@ -260,6 +260,12 @@ typedef unsigned long uintmax_t;
 typedef int socklen_t;
 #endif
 
+/* sa_family_t */
+#ifndef HAVE_SA_FAMILY_T
+/* This isn't safe to use in a structure; for that, need more smarts */
+typedef unsigned int sa_family_t;
+#endif
+
 /* sysexits.h */
 
 #ifdef HAVE_SYSEXITS_H

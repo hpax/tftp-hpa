@@ -3,6 +3,7 @@
  *
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 2026 H. Peter Anvin <hpa@zytor.com>
  */
 
 #ifndef TFTPSUBS_H
@@ -83,6 +84,8 @@ int set_sock_addr(char *, union sock_addr *, char **, bool);
 void tftp_set_socket_buffers(int, unsigned int, unsigned int, bool);
 int tftp_recv_time(int, void *, int, unsigned int, struct sockaddr *,
                    socklen_t *, unsigned long *);
+const char *net_family(sa_family_t);
+char *net_address(const struct sockaddr *, socklen_t);
 
 /*
  * Wrapper for setsockopt() for the case where the option is an int.
