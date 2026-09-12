@@ -187,8 +187,9 @@ static void tftpd_log_stderr(int priority, const char *fmt, ...)
 {
     va_list ap;
 
-    fprintf(stderr, "%s: %s",
+    fprintf(stderr, "%s[%lu]: %s",
             _progname ? _progname : "tftpd",
+            (unsigned long)_progpid,
             prio_name(priority));
 
     va_start(ap, fmt);
@@ -944,13 +945,15 @@ int main(int argc, char **argv)
         if ((from.sa.sa_family != AF_INET) && (from.sa.sa_family != AF_INET6)) {
             tftpd_log(LOG_ERR, "received address was not AF_INET/AF_INET6,"
                    " please check your inetd config");
+            exit(EX_PROTOCOL);
+        }
 #else
         if (from.sa.sa_family != AF_INET) {
             tftpd_log(LOG_ERR, "received address was not AF_INET,"
                    " please check your inetd config");
-#endif
             exit(EX_PROTOCOL);
         }
+#endif
 
         if (standalone) {
             union sock_addr sa;
@@ -992,7 +995,6 @@ int main(int argc, char **argv)
             tftpd_log(LOG_ERR, "fork: %s", strerror(errno));
             exit(EX_OSERR);     /* Return to inetd, just in case */
         } else if (pid == 0) {
-            ackbuf = xmalloc(PKTSIZE);
             break;              /* Child exits listen loop */
         }
 
@@ -1005,6 +1007,7 @@ int main(int argc, char **argv)
     }
 
     /* Child process: handle the actual request here */
+    post_fork();
 
     /* Ignore SIGHUP; make SIGTERM and SIGINT kill the process */
     set_signal(SIGHUP,  SIG_IGN, 0);
@@ -1058,13 +1061,10 @@ int main(int argc, char **argv)
 
     /* Chroot and drop privileges */
     if (secure) {
-        if (chroot(".")) {
+        if (chroot(".") || chdir("/")) {
             tftpd_log(LOG_ERR, "chroot: %s", strerror(errno));
             exit(EX_OSERR);
         }
-#ifdef __CYGWIN__
-        chdir("/");             /* Cygwin chroot() bug workaround */
-#endif
     }
 
 #ifdef HAVE_SETRESGID
@@ -1108,6 +1108,9 @@ int main(int argc, char **argv)
     }
 
     tftpd_config_socket(peer, true);
+
+    /* Packet receive buffer */
+    ackbuf = xmalloc(PKTSIZE);
 
     tp = (struct tftphdr *)buf;
     tp_opcode = ntohs(tp->th_opcode);
