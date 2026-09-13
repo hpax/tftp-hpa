@@ -20,7 +20,7 @@
 #include "common/tftpsubs.h"
 #include "common/pollset.h"
 
-typedef void (*log_func)(int, const char *, ...);
+typedef PRINTF_FUNC(2,3) void (*log_func)(int, const char *, ...);
 extern log_func tftpd_log;
 
 void set_signal(int, void (*)(int), int);

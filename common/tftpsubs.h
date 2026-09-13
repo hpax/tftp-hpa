@@ -17,10 +17,10 @@ void set_progname(const char *);	/* main() should pass argv[0] here */
 void post_fork(void);                   /* Invoke in child after fork() */
 
 extern void (*out_of_memory)(void);	/* Optional out of memory handler */
-void *xmalloc(size_t);
-void *xcalloc(size_t, size_t);
-void *xrealloc(void *, size_t);
-char *xstrdup(const char *);
+MALLOC_FUNC void *xmalloc(size_t);
+CALLOC_FUNC void *xcalloc(size_t, size_t);
+REALLOC_FUNC void *xrealloc(void *, size_t);
+NEWBUF_FUNC char *xstrdup(const char *);
 void xfree(void *);
 
 union sock_addr {
