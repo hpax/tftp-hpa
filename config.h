@@ -306,13 +306,97 @@ static inline void *mempcpy(void *dst, const void *src, size_t n)
 }
 #endif
 
-/* How do we annotate unused data items? */
-
+/* Various attributes */
 #ifndef UNUSED
 #ifdef __GNUC__
 #define UNUSED __attribute__((unused))
 #else
 #define UNUSED
+#endif
+#endif
+
+#ifndef likely
+#ifdef __GNUC__
+#define likely(x)   __builtin_expect(!!(x), 1)
+#else
+#define likely(x)   (!!(x))
+#endif
+#endif
+
+#ifndef unlikely
+#ifdef __GNUC__
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+#define unlikely(x) (!!(x))
+#endif
+#endif
+
+#ifndef PRINTF_FUNC
+#ifdef __GNUC__
+#define PRINTF_FUNC(fmt,lst) __attribute__((format(printf,fmt,lst)))
+#else
+#define PRINTF_FUNC(fmt,lst)
+#endif
+#endif
+
+#ifndef CONST_FUNC
+#ifdef __GNUC__
+#define CONST_FUNC __attribute__((const))
+#else
+#define CONST_FUNC
+#endif
+#endif
+
+#ifndef PURE_FUNC
+#ifdef __GNUC__
+#define PURE_FUNC __attribute__((pure))
+#else
+#define PURE_FUNC
+#endif
+#endif
+
+/* For a malloc()-like function which never returns NULL */
+#ifndef MALLOC_FUNC
+#ifdef __GNUC__
+#define MALLOC_FUNC __attribute__((malloc,returns_nonnull,alloc_size(1)))
+#else
+#define MALLOC_FUNC
+#endif
+#endif
+
+/* For a calloc()-like function which never returns NULL */
+#ifndef CALLOC_FUNC
+#ifdef __GNUC__
+#define CALLOC_FUNC __attribute__((malloc,returns_nonnull,alloc_size(1,2)))
+#else
+#define CALLOC_FUNC
+#endif
+#endif
+
+/* For a realloc function which never returns null */
+#ifndef REALLOC_FUNC
+#ifdef __GNUC__
+#define REALLOC_FUNC __attribute__((returns_nonnull,alloc_size(2)))
+#else
+#define REALLOC_FUNC
+#endif
+#endif
+
+/* A function which returns a pointer to a newly allocated buffer, never NULL */
+#ifndef NEWBUF_FUNC
+#ifdef __GNUC__
+#define NEWBUF_FUNC __attribute__((malloc,returns_nonnull))
+#else
+#define NEWBUF_FUNC
+#endif
+#endif
+
+/* Inhibit inlining */
+#ifndef NOINLINE_FUNC
+#ifdef __GNUC__
+#define NOINLINE_FUNC __attribute__((noinline))
+#else
+#define NOINLINE_FUNC
 #endif
 #endif
 
