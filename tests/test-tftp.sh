@@ -14,7 +14,7 @@ TFTP="${2:-${REPO_ROOT}/tftp/tftp}"
 PORT="${3:-6969}"
 PORTRANGE="${4:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
-ANYADDR="${:-0}"
+ANYADDR="${ANYADDR:-0}"
 TESTROOT=$(mktemp -d)
 SERVER_DIR="$TESTROOT"
 FILES_DIR="$TESTROOT/files"
@@ -24,7 +24,8 @@ PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
 TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
 TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-199 512 1468 9001}"
 
-trap 'cleanup' EXIT INT TERM
+trap 'exit 127' INT TERM
+trap 'cleanup' EXIT
 
 # Color output helpers
 RED='\033[0;31m'
@@ -197,6 +198,7 @@ create_test_files() {
 test_download() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
+    local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$DL_DIR"
     rm -f "$DL_DIR/$filename"
@@ -217,30 +219,38 @@ test_download() {
 		       "$LOCALHOST" "$PORT"
 		       -c get files/"$filename" "$download_file")
     print_info "${TFTP_CMD[*]}"
+    rm -f "$logfile"
     local start=$(date -u +%s.%N)
-    "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
+    "${TFTP_CMD[@]}" 2>&1 > "$logfile"
+    status=$?
     local end=$(date -u +%s.%N)
+    grep -v '^Connected ' "$logfile"
     print_info time = $(difftime $start $end)
 
-    # Verify file was downloaded
-    if [ ! -f "$download_file" ]; then
+    if [ $status -ne 0 ]; then
+	print_error "TFTP exited with status $status"
+	if [ $status -gt 127 ]; then
+	    # Exit immediately on signal
+	    return $status
+	fi
+    elif [ ! -f "$download_file" ]; then
         print_error "Failed to download $filename"
-        return 1
-    fi
-
-    # Compare files
-    if ! cmp -s "$FILES_DIR/$filename" "$DL_DIR/$filename"; then
+    elif ! cmp -s "$FILES_DIR/$filename" "$DL_DIR/$filename"; then
         print_error "Downloaded file differs from original: $filename"
-        return 1
+    else
+	print_success "Download test passed: $filename"
+	tests_passed=$((tests_passed + 1))
     fi
 
-    print_success "Download test passed: $filename"
+    tests_total=$((tests_total + 1))
+    return 0
 }
 
 # Test file upload (client sends)
 test_upload() {
     local filename="$1"
     local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
+    local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$UL_DIR"
     rm -f "$UL_DIR/$filename"
@@ -253,34 +263,45 @@ test_upload() {
 
     print_info "Testing upload: $filename"
 
-    # Use tftp to upload the file
+    # Upload using tftp
+    local upload_file="$UL_DIR/$filename"
+
     # The server will write it to SERVER_DIR
     local -a TFTP_CMD=("$TFTP" "${tftp_options[@]}" "-m" "$mode"
 		       "$LOCALHOST" "$PORT"
 		       -c put "$FILES_DIR/$filename" upload/"$filename")
     print_info "${TFTP_CMD[*]}"
+    rm -f "$logfile"
     local start=$(date -u +%s.%N)
-    "${TFTP_CMD[@]}" 2>&1 | grep -v "^Connected"
+    "${TFTP_CMD[@]}" 2>&1 > "$logfile"
     local end=$(date -u +%s.%N)
+    grep -v '^Connected ' "$logfile"
     print_info time = $(difftime $start $end)
 
-    # Verify file was uploaded
-    if [ ! -f "$UL_DIR/$filename" ]; then
+    if [ $status -ne 0 ]; then
+	print_error "TFTP exited with status $status"
+	if [ $status -gt 127 ]; then
+	    # Exit immediately on signal
+	    return $status
+	fi
+    elif [ ! -f "$upload_file" ]; then
         print_error "Failed to upload $filename"
-        return 1
-    fi
-
-    # Compare files
-    if ! cmp -s "$FILES_DIR/$filename" "$UL_DIR/$filename"; then
+    elif ! cmp -s "$FILES_DIR/$filename" "$UL_DIR/$filename"; then
         print_error "Uploaded file differs from original: $filename"
-        return 1
+    else
+	print_success "Upload test passed: $filename"
+	tests_passed=$((tests_passed + 1))
     fi
 
-    print_success "Upload test passed: $filename"
+    tests_total=$((tests_total + 1))
+    return 0
 }
 
 # Main test execution
 main() {
+    tests_passed=0
+    tests_total=0
+
     umask 077
 
     print_info "================================"
@@ -292,8 +313,6 @@ main() {
     print_info "Server port:      $PORT"
     print_info ""
 
-    local tests_passed=sys0
-    local tests_failed=0
     local start_tests=$(date -u +%s.%N)
 
     check_binaries
@@ -318,11 +337,7 @@ main() {
 
 		print_info "Running download tests..."
 		for testfile in "${testfiles[@]}"; do
-		    if test_download $testfile; then
-			((tests_passed++))
-		    else
-			((tests_failed++))
-		    fi
+		    test_download $testfile || return $?
 		done
 
 		# Clear server directory of downloaded test files
@@ -331,17 +346,15 @@ main() {
 		print_info "Running upload tests..."
 
 		for testfile in "${testfiles[@]}"; do
-		    if test_upload $testfile; then
-			((tests_passed++))
-		    else
-			((tests_failed++))
-		    fi
+		    test_upload $testfile || return $?
 		done
 	    done
 	done
     done
 
     local end_tests=$(date -u +%s.%N)
+
+    tests_failed=$((tests_total - tests_passed))
 
     print_info ""
     print_info "================================"
