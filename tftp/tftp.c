@@ -740,7 +740,7 @@ static void timer(int sig)
     if (timeout >= (unsigned long)maxtimeout * USEC_PER_SEC) {
         printf("Transfer timed out.\n");
         errno = save_errno;
-        siglongjmp(toplevel, -1);
+        siglongjmp(toplevel, EX_TEMPFAIL);
     }
     errno = save_errno;
     siglongjmp(*active_timeoutbuf, 1);

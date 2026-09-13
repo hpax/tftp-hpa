@@ -378,7 +378,9 @@ int main(int argc, char *argv[])
         sp = fallback_sp;
     }
 
-    tftp_signal(SIGINT, intr, 0);
+    /* Allow SIGINT in non-interactive mode to terminate the program */
+    if (!iscmd)
+        tftp_signal(SIGINT, intr, 0);
 
     if (peerargc > 1) {
         /* Set peer */
@@ -426,11 +428,11 @@ int main(int argc, char *argv[])
             exit(EX_USAGE);
         }
 
-        if (sigsetjmp(toplevel, 1) != 0)
-            exit(EX_UNAVAILABLE);
-
-        ret = (*c->handler) (pargc, pargv);
-        xfree(splitbuf);
+        ret = sigsetjmp(toplevel, 1);
+        if (!ret) {
+            ret = (*c->handler) (pargc, pargv);
+            xfree(splitbuf);
+        }
         exit(ret);
     }
 #ifdef WITH_READLINE
@@ -931,11 +933,16 @@ static int status(int argc, char *argv[])
 
 static void intr(int sig)
 {
-    (void)sig;                  /* Quiet unused warning */
+    int err;
 
     alarm(0);
     tftp_signal(SIGALRM, SIG_DFL, 0);
-    siglongjmp(toplevel, -1);
+    if (sig == SIGALRM)
+        err = EX_TEMPFAIL;
+    else
+        err = sig + 128;
+
+    siglongjmp(toplevel, err);
 }
 
 static char *tail(char *filename)
