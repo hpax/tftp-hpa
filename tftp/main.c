@@ -254,6 +254,7 @@ int main(int argc, char *argv[])
     char *peerargv[3];
 
     set_progname(argv[0]);
+    random_init();
 
     mode = MODE_DEFAULT;
 

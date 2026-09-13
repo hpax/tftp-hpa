@@ -475,9 +475,10 @@ int main(int argc, char **argv)
     set_progname(argv[0]);
     out_of_memory = tftpd_out_of_memory;
 
-    /* rand() is used for TFTP backoff; it doesn't have to be good */
-    srand(time(NULL) ^ getpid());
+    /* Randomness is used for port (transfer ID) assignment */
+    random_init();
 
+    /* Initialize the list and pollset of listen addresses */
     listen_set = pollset_new();
     atexit(close_listen_set);
 
@@ -990,6 +991,7 @@ int main(int argc, char **argv)
          * Now that we have read the request packet from the UDP
          * socket, we fork and go back to listening to the socket.
          */
+
         pid = fork();
         if (pid < 0) {
             tftpd_log(LOG_ERR, "fork: %s", strerror(errno));
@@ -997,6 +999,8 @@ int main(int argc, char **argv)
         } else if (pid == 0) {
             break;              /* Child exits listen loop */
         }
+
+        random_post_fork_parent();
 
         /*
          * The child owns this request.  Release the parent's copy before
@@ -1008,6 +1012,7 @@ int main(int argc, char **argv)
 
     /* Child process: handle the actual request here */
     post_fork();
+    random_post_fork_child();
 
     /* Ignore SIGHUP; make SIGTERM and SIGINT kill the process */
     set_signal(SIGHUP,  SIG_IGN, 0);

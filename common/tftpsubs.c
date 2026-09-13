@@ -129,36 +129,29 @@ int pick_port_bind(int sockfd, union sock_addr *myaddr,
                    unsigned int port_range_from,
                    unsigned int port_range_to)
 {
-    unsigned int port, firstport;
-    bool port_range;
+    if (port_range_from | port_range_to) {
+        uint16_t port, firstport;
 
-    port_range = port_range_from != 0 && port_range_to != 0;
+        port = firstport = port_range_from
+            + random_u32() % ((uint16_t)(port_range_to - port_range_from) + 1);
 
-    firstport = port_range
-        ? port_range_from + rand() % (port_range_to - port_range_from + 1)
-        : 0;
+        do {
+            sa_set_port(myaddr, htons(port));
+            if (likely(!bind(sockfd, &myaddr->sa, SOCKLEN(myaddr))))
+                return 0;
 
-    port = firstport;
+            /* Keep trying until a free port is found */
+            port++;
+            if (port > port_range_to)
+                port = port_range_from;
+        } while (port != firstport);
 
-    do {
-        sa_set_port(myaddr, htons(port));
-        if (bind(sockfd, &myaddr->sa, SOCKLEN(myaddr)) < 0) {
-            /* Some versions of Linux return EINVAL instead of EADDRINUSE */
-            if (!(port_range && (errno == EINVAL || errno == EADDRINUSE)))
-                return -1;
-
-            /* Normally, we shouldn't have to loop, but some situations involving
-               aborted transfers make it possible. */
-        } else {
-            return 0;
-        }
-
-        port++;
-        if (port > port_range_to)
-            port = port_range_from;
-    } while (port != firstport);
-
-    return -1;
+        return -1;              /* Failed to allocate a port */
+    } else {
+        /* Let the kernel pick. */
+        sa_set_port(myaddr, 0);
+        return bind(sockfd, &myaddr->sa, SOCKLEN(myaddr));
+    }
 }
 
 /*

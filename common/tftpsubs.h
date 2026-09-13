@@ -23,6 +23,30 @@ REALLOC_FUNC void *xrealloc(void *, size_t);
 NEWBUF_FUNC char *xstrdup(const char *);
 void xfree(void *);
 
+#ifndef HAVE_RANDOM
+static inline long random(void)
+{
+    return rand();
+}
+static inline void srandom(unsigned int seed)
+{
+    return srand(seed);
+}
+#endif
+
+void random_init(void);
+extern uint32_t (*random_u32)(void);
+
+/* ... these might be made fancier at some point ... */
+static inline void random_post_fork_parent(void)
+{
+    /* Advance the PRNG at least once per client */
+    (void)random();
+}
+static inline void random_post_fork_child(void)
+{
+}
+
 union sock_addr {
     struct sockaddr     sa;
     struct sockaddr_in  si;

@@ -10,7 +10,7 @@ VERSION = $(shell cat ../version)
 include ../MRULES
 
 OBJS = tftpsubs.$(O) tftp-xfer.$(O) tftp-io.$(O) signal.$(O) xalloc.$(O) \
-	progname.$(O) pollset.$(O) clock.$(O) address.$(O)
+	progname.$(O) pollset.$(O) clock.$(O) address.$(O) random.$(O)
 LIB  = libcommon.a
 
 all: $(LIB)
