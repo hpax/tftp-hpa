@@ -100,6 +100,7 @@ static int setbinary(int, char **);
 static int setblocksize(int, char **);
 static int setpeer(int, char **);
 static int setrexmt(int, char **);
+static int set_transfer_host(char *, const char *);
 static int settimeout(int, char **);
 static int settrace(int, char **);
 static int set_verbosity(const char *, bool);
@@ -515,15 +516,17 @@ static int setpeer(int argc, char *argv[])
         return EX_USAGE;
     }
 
-    peeraddr.sa.sa_family = xopt.ai_fam;
-    err = set_sock_addr(argv[1], &peeraddr, &hostname, false);
+    err = set_transfer_host(argv[1], argc == 3 ? argv[2] : NULL);
     if (err) {
-        printf("Error: %s\n", gai_strerror(err));
-        printf("%s: unknown host\n", argv[1]);
+        if (err == EAI_SERVICE)
+            printf("%s: bad port number\n", argv[2]);
+        else {
+            printf("Error: %s\n", gai_strerror(err));
+            printf("%s: unknown host\n", argv[1]);
+        }
         connected = false;
-        return EX_NOHOST;
+        return err == EAI_SERVICE ? EX_USAGE : EX_NOHOST;
     }
-    xopt.ai_fam = peeraddr.sa.sa_family;
     if (f == -1) { /* socket not open */
         ai_fam_sock = xopt.ai_fam;
     } else { /* socket was already open */
@@ -545,24 +548,8 @@ static int setpeer(int argc, char *argv[])
             }
         }
     }
-    port = sp->s_port;
-    if (argc == 3) {
-        const struct servent *usp;
-        usp = getservbyname(argv[2], "udp");
-        if (usp) {
-            port = usp->s_port;
-        } else {
-            unsigned long myport;
-            char *ep;
-            myport = strtoul(argv[2], &ep, 10);
-            if (*ep || myport > 65535UL) {
-                printf("%s: bad port number\n", argv[2]);
-                connected = false;
-                return EX_USAGE;
-            }
-            port = htons((uint16_t) myport);
-        }
-    }
+    if (argc == 2)
+        port = sp->s_port;
 
     if (copt.verbose) {
         char tmp[INET6_ADDRSTRLEN];
@@ -633,6 +620,36 @@ static void settftpmode(const struct modes *newmode)
         printf("mode set to %s\n", copt.mode->m_mode);
 }
 
+static int set_transfer_host(char *host, const char *port_name)
+{
+    const struct servent *service;
+    int err;
+
+    peeraddr.sa.sa_family = xopt.ai_fam;
+    err = set_sock_addr(host, &peeraddr, &hostname, false);
+    if (err)
+        return err;
+
+    if (port_name) {
+        service = getservbyname(port_name, "udp");
+        if (service) {
+            port = service->s_port;
+        } else {
+            char *ep;
+            unsigned long port_number = strtoul(port_name, &ep, 10);
+
+            if (*ep || port_number > 65535UL)
+                return EAI_SERVICE;
+
+            port = htons((uint16_t)port_number);
+        }
+    }
+
+    xopt.ai_fam = peeraddr.sa.sa_family;
+    connected = true;
+    return 0;
+}
+
 /*
  * Send file(s).
  */
@@ -664,16 +681,13 @@ static int put(int argc, char *argv[])
         cp = argv[argc - 1];
         targ = strchr(cp, ':');
         *targ++ = 0;
-        peeraddr.sa.sa_family = xopt.ai_fam;
-        err = set_sock_addr(cp, &peeraddr, &hostname, false);
+        err = set_transfer_host(cp, NULL);
         if (err) {
             printf("Error: %s\n", gai_strerror(err));
-            printf("%s: unknown host\n", argv[1]);
+            printf("%s: unknown host\n", cp);
             connected = false;
             return EX_NOHOST;
         }
-        xopt.ai_fam = peeraddr.sa.sa_family;
-        connected = true;
     }
     if (!connected) {
         printf("No target machine specified.\n");
@@ -767,17 +781,14 @@ static int get(int argc, char *argv[])
             int resolve_error;
 
             *src++ = 0;
-            peeraddr.sa.sa_family = xopt.ai_fam;
-            resolve_error = set_sock_addr(argv[n], &peeraddr, &hostname, false);
+            resolve_error = set_transfer_host(argv[n], NULL);
             if (resolve_error) {
                 printf("Warning: %s\n", gai_strerror(resolve_error));
-                printf("%s: unknown host\n", argv[1]);
+                printf("%s: unknown host\n", argv[n]);
                 if (!err)
                     err = EX_NOHOST;
                 continue;
             }
-            xopt.ai_fam = peeraddr.sa.sa_family;
-            connected = true;
         }
         if (argc < 4) {
             cp = argc == 3 ? argv[2] : tail(src);
