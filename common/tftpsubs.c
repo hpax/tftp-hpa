@@ -5,6 +5,8 @@
  *	The Regents of the University of California.  All rights reserved.
  */
 
+#include "config.h"
+#include "options.h"
 #include "tftpsubs.h"
 #include "pollset.h"
 #include "clock.h"
@@ -125,15 +127,14 @@ int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
     return rv;
 }
 
-int pick_port_bind(int sockfd, union sock_addr *myaddr,
-                   unsigned int port_range_from,
-                   unsigned int port_range_to)
+int pick_port_bind(int sockfd, union sock_addr *myaddr)
 {
-    if (port_range_from | port_range_to) {
+    if (xopt.portrange_from | xopt.portrange_to) {
         uint16_t port, firstport;
 
-        port = firstport = port_range_from
-            + random_u32() % ((uint16_t)(port_range_to - port_range_from) + 1);
+        port = firstport = xopt.portrange_from
+            + random_u32() %
+            ((uint16_t)(xopt.portrange_to - xopt.portrange_from) + 1);
 
         do {
             sa_set_port(myaddr, htons(port));
@@ -142,8 +143,8 @@ int pick_port_bind(int sockfd, union sock_addr *myaddr,
 
             /* Keep trying until a free port is found */
             port++;
-            if (port > port_range_to)
-                port = port_range_from;
+            if (port > xopt.portrange_to)
+                port = xopt.portrange_from;
         } while (port != firstport);
 
         return -1;              /* Failed to allocate a port */

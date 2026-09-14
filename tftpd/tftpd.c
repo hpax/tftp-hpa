@@ -1086,8 +1086,7 @@ int main(int argc, char **argv)
     }
 
     /* Process the request... */
-    if (pick_port_bind(peer, &myaddr, xopt.portrange_from,
-                       xopt.portrange_to) < 0) {
+    if (pick_port_bind(peer, &myaddr)) {
         tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
         exit(EX_IOERR);
     }

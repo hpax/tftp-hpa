@@ -406,7 +406,7 @@ int main(int argc, char *argv[])
     }
     bzero(&sa, sizeof(sa));
     sa.sa.sa_family = ai_fam_sock;
-    if (pick_port_bind(f, &sa, xopt.portrange_from, xopt.portrange_to)) {
+    if (pick_port_bind(f, &sa)) {
         perror("tftp: bind");
         exit(EX_OSERR);
     }
@@ -539,8 +539,7 @@ static int setpeer(int argc, char *argv[])
             }
             bzero((char *)&sa, sizeof (sa));
             sa.sa.sa_family = ai_fam_sock;
-            if (pick_port_bind(f, &sa, xopt.portrange_from,
-                               xopt.portrange_to)) {
+            if (pick_port_bind(f, &sa)) {
                 perror("tftp: bind");
                 exit(EX_OSERR);
             }

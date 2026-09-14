@@ -125,8 +125,7 @@ static inline int setsockint(int sockfd, int level, int optname,
 extern int segsize;
 #define MAX_SEGSIZE	65464
 
-int pick_port_bind(int sockfd, union sock_addr *myaddr,
-                   unsigned int from, unsigned int to);
+int pick_port_bind(int sockfd, union sock_addr *myaddr);
 
 int get_nullfd(void);
 
