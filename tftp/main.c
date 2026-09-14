@@ -94,9 +94,13 @@ static void help_init(void);
 static int print_cmd_help(const char *);
 
 static int get(int, char **);
+static int getfiles(int, char **, const char *);
 static int help(int, char **);
+static int mget(int, char **);
 static int modecmd(int, char **);
+static int mput(int, char **);
 static int put(int, char **);
+static int putfiles(int, char **, bool);
 static int quit(int, char **);
 static int setascii(int, char **);
 static int setbinary(int, char **);
@@ -165,6 +169,18 @@ static const struct cmd cmdtab[] = {
         "  Enable literal mode to prevent special treatment of ':' in filenames.\n"
     },
     {
+        "mp[ut]", mput,
+        "send (upload) multiple files",
+        "  mput local-file... [host:]remote-directory\n"
+        "    Upload one or more files to a directory on the remote host.\n"
+        "\n"
+        "  The remote host is assumed to use '/' as its directory separator.\n"
+        "  The remote name may be of the form host:filename to specify\n"
+        "  the remote host to connect to, as if the 'connect' command had\n"
+        "  been used to specify this host.\n"
+        "  Enable literal mode to prevent special treatment of ':' in filenames.\n"
+    },
+    {
         "g[et]", get,
         "receive (download) file or files",
         "  get [host:]remote-file [local-file]\n"
@@ -174,6 +190,19 @@ static const struct cmd cmdtab[] = {
         "  get [host:]remote-file [host:]remote-file [host:]remote-file...\n"
         "    Download three or more files into the current directory on the\n"
         "   local system. See also the 'mget' command.\n"
+        "\n"
+        "  The remote host is assumed to use '/' as its directory separator.\n"
+        "  The remote name may be of the form host:filename to specify\n"
+        "  the remote host to connect to, as if the 'connect' command had\n"
+        "  been used to specify this host.\n"
+        "  Enable literal mode to prevent special treatment of ':' in filenames.\n"
+    },
+    {
+        "mg[et]", mget,
+        "receive (download) multiple files",
+        "  mget [host:]remote-file... local-directory\n"
+        "    Download one or more files from from a remote directory into\n"
+        "    a specified directory on the local system.\n"
         "\n"
         "  The remote host is assumed to use '/' as its directory separator.\n"
         "  The remote name may be of the form host:filename to specify\n"
@@ -756,10 +785,10 @@ static bool is_directory(const char *filename)
 /*
  * Send file(s).
  */
-static int put(int argc, char *argv[])
+static int putfiles(int argc, char *argv[], bool target_is_directory)
 {
     int fd;
-    int n, err;
+    int n, err, result;
     char *cp;
     char *targ;
 
@@ -797,7 +826,8 @@ static int put(int argc, char *argv[])
         printf("No target machine specified.\n");
         return EX_USAGE;
     }
-    if (argc < 3 || (argc == 3 && !is_directory(targ))) {
+    if (!target_is_directory &&
+        (argc < 3 || (argc == 3 && !is_directory(targ)))) {
         cp = argc == 2 ? tail(targ) : argv[1];
         fd = open(cp, O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
@@ -833,13 +863,27 @@ static int put(int argc, char *argv[])
             printf("putting %s to %s:%s [%s]\n",
                    argv[n], hostname, remotepath, copt.mode->m_mode);
         sa_set_port(&peeraddr, port);
-        n = tftp_sendfile(fd, remotepath, copt.mode->m_mode,
-                          xopt.max_windowsize);
+        result = tftp_sendfile(fd, remotepath, copt.mode->m_mode,
+                               xopt.max_windowsize);
         if (!err)
-            err = n;
+            err = result;
         free(remotepath);
     }
     return err;
+}
+
+static int put(int argc, char *argv[])
+{
+    return putfiles(argc, argv, false);
+}
+
+static int mput(int argc, char *argv[])
+{
+    if (argc < 3) {
+        putusage(argv[0]);
+        return EX_USAGE;
+    }
+    return putfiles(argc, argv, true);
 }
 
 static void putusage(const char *s)
@@ -851,10 +895,10 @@ static void putusage(const char *s)
 /*
  * Receive file(s).
  */
-static int get(int argc, char *argv[])
+static int getfiles(int argc, char *argv[], const char *local_directory)
 {
     int fd;
-    int n, err;
+    int n, err, result;
     char *cp;
     char *src;
 
@@ -865,19 +909,19 @@ static int get(int argc, char *argv[])
         argc = margc;
         argv = margv;
     }
-    if (argc < 2) {
+    if (argc < 2 + !!local_directory) {
         getusage(argv[0]);
         return EX_USAGE;
     }
     if (!connected) {
-        for (n = 1; n < argc; n++)
+        for (n = 1; n < argc - !!local_directory; n++)
             if (copt.literal || strchr(argv[n], ':') == 0) {
                 getusage(argv[0]);
                 return EX_USAGE;
             }
     }
     err = 0;
-    for (n = 1; n < argc; n++) {
+    for (n = 1; n < argc - !!local_directory; n++) {
         src = strchr(argv[n], ':');
         if (copt.literal || src == NULL)
             src = argv[n];
@@ -894,7 +938,8 @@ static int get(int argc, char *argv[])
                 continue;
             }
         }
-        if (argc < 3 || (argc == 3 && !is_directory(argv[2]))) {
+        if (!local_directory &&
+            (argc < 3 || (argc == 3 && !is_directory(argv[2])))) {
             cp = argc == 3 ? argv[2] : tail(src);
             fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                       0666);
@@ -911,7 +956,14 @@ static int get(int argc, char *argv[])
                                 xopt.max_windowsize);
             break;
         }
-        cp = tail(src);         /* new .. jdg */
+        if (local_directory) {
+            const char *base = tail(src);
+
+            cp = xmalloc(strlen(local_directory) + 1 + strlen(base) + 1);
+            sprintf(cp, "%s/%s", local_directory, base);
+        } else {
+            cp = tail(src);     /* new .. jdg */
+        }
         fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                   0666);
         if (fd < 0) {
@@ -919,18 +971,36 @@ static int get(int argc, char *argv[])
             perror(cp);
             if (!err)
                 err = EX_OSERR;
+            if (local_directory)
+                free(cp);
             continue;
         }
         if (copt.verbose)
             printf("getting from %s:%s to %s [%s]\n",
                    hostname, src, cp, copt.mode->m_mode);
         sa_set_port(&peeraddr, port);
-        n = tftp_recvfile(fd, src, copt.mode->m_mode,
-                          xopt.max_windowsize);
+        result = tftp_recvfile(fd, src, copt.mode->m_mode,
+                               xopt.max_windowsize);
         if (!err)
-            err = n;
+            err = result;
+        if (local_directory)
+            free(cp);
     }
     return err;
+}
+
+static int get(int argc, char *argv[])
+{
+    return getfiles(argc, argv, NULL);
+}
+
+static int mget(int argc, char *argv[])
+{
+    if (argc < 3) {
+        getusage(argv[0]);
+        return EX_USAGE;
+    }
+    return getfiles(argc, argv, argv[argc - 1]);
 }
 
 static void getusage(const char *s)

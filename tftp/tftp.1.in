@@ -150,6 +150,17 @@ future transfers.  Enable
 .B literal
 mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
 .TP
+\fBmget\fP \fIfile1 file2 ... local-directory\fP
+Get one or more files from the specified remote sources into
+\fIlocal-directory\fP.  Each remote filename can be a plain filename
+on the configured remote host, or a string of the form
+.I "host:filename"
+to specify both a host and filename at the same time.  If the latter
+form is used, the last hostname specified becomes the default for
+future transfers.  Enable
+.B literal
+mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
+.TP
 .B literal
 Toggle literal mode.  When set, this mode prevents special treatment of ':' in filenames.
 .TP
@@ -186,6 +197,18 @@ to specify both a host and filename at the same time.  If the latter
 form is used, the hostname specified becomes the default for future
 transfers.  If the remote-directory form is used, the remote host is
 assumed to be a UNIX system or another system using
+.B /
+as directory separator.  Enable
+.B literal
+mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
+.TP
+\fBmput\fP \fIfile1 file2 ... remote-directory\fP
+Put one or more files to \fIremote-directory\fP.  The destination can
+be a directory on the configured remote host, or a string of the form
+.I "host:directory"
+to specify both a host and directory at the same time.  If the latter
+form is used, the hostname specified becomes the default for future
+transfers.  The remote host is assumed to use
 .B /
 as directory separator.  Enable
 .B literal
