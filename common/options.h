@@ -1,0 +1,22 @@
+/*
+ * SPDX-License-Identifier: BSD-4-Clause-UC
+ *
+ * Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
+ */
+
+#ifndef COMMON_OPTIONS_H
+#define COMMON_OPTIONS_H
+
+#include "config.h"
+
+struct common_options {
+    int ai_fam;
+    unsigned int portrange_from;
+    unsigned int portrange_to;
+    unsigned int max_blksize;
+    unsigned int max_windowsize;
+};
+
+extern struct common_options xopt;
+
+#endif /* COMMON_OPTIONS_H */

@@ -13,13 +13,12 @@
 
 #include "config.h"             /* Must be included first */
 #include "tftpd.h"
+#include "options.h"
 #include "common/pollset.h"
 
 #ifndef AI_IDN
 #define AI_IDN 0
 #endif
-
-const char *default_service = "tftp";
 
 int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam)
 {
@@ -76,7 +75,7 @@ int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam)
         hostname = NULL;
 
     if (!service)
-        service = default_service;
+        service = dopt.service;
 
     err = getaddrinfo(hostname, service, &hints, &addrs);
     if (err) {

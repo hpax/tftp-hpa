@@ -10,6 +10,7 @@
 #include "common/tftp-io.h"
 #include "common/tftp-xfer.h"
 #include "common/clock.h"
+#include "options.h"
 
 /*
  * TFTP User Program -- Protocol Machines
@@ -18,12 +19,6 @@
 
 extern union sock_addr peeraddr; /* filled in by main */
 extern int f;                    /* the opened socket */
-extern bool trace;
-extern int verbose;
-extern int rexmtval;
-extern int maxtimeout;
-extern unsigned int blocksize;
-extern unsigned int windowsize;
 
 #define USEC_PER_SEC 1000000UL
 static char *ackbuf;
@@ -65,7 +60,7 @@ static int client_recv_time(void *packet, int length, union sock_addr *from,
 static int client_xfer_send(void *vctx, const void *packet, int length)
 {
     (void)vctx;
-    if (trace)
+    if (copt.trace)
         tpacket("sent", packet, length);
     return sendto(f, packet, length, 0, &peeraddr.sa,
                   sizeof peeraddr) == length ? 0 : -1;
@@ -82,7 +77,7 @@ static void client_xfer_received(void *vctx, const struct tftphdr *packet,
                                  int length)
 {
     (void)vctx;
-    if (trace)
+    if (copt.trace)
         tpacket("received", packet, length);
 }
 
@@ -92,7 +87,7 @@ static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
     (void)vctx;
     active_timeoutbuf = retrybuf;
     if (!restarted)
-        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
+        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
 }
 
 static void client_xfer_retry_leave(void *vctx)
@@ -137,7 +132,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    bool requested_options = blocksize != SEGSIZE || requested_window;
+    bool requested_options = xopt.max_blksize != SEGSIZE || requested_window;
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
@@ -156,7 +151,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     ap = (struct tftphdr *)ackbuf;
 
     tftp_signal(SIGALRM, timer, 0);
-    size = makerequest(WRQ, name, ap, mode, blocksize, requested_window,
+    size = makerequest(WRQ, name, ap, mode, xopt.max_blksize, requested_window,
                        TFTP_XFER_MAX_PACKET_SIZE);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
@@ -166,9 +161,9 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
 
     /* A peer which ignores options answers a WRQ with ACK 0. */
     for (;;) {
-        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
+        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
         (void)sigsetjmp(timeoutbuf, 1);
-        if (trace)
+        if (copt.trace)
             tpacket("sent", ap, size);
         if (sendto(f, ap, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
             perror("tftp: sendto");
@@ -186,7 +181,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
         }
         if (n < 2)
             goto wait_for_reply;
-        if (trace)
+        if (copt.trace)
             tpacket("received", rp, n);
         ap_opcode = ntohs(rp->th_opcode);
         ap_block = ntohs(rp->th_block);
@@ -196,7 +191,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
             goto abort;
         }
         if (requested_options && ap_opcode == OACK) {
-            if (!parse_oack(rp, n, blocksize, requested_window,
+            if (!parse_oack(rp, n, xopt.max_blksize, requested_window,
                             &negotiated_block, &negotiated_window)) {
                 nak(EOPTNEG, "Invalid option response");
                 err = EX_PROTOCOL;
@@ -295,7 +290,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    bool requested_options = blocksize != SEGSIZE || requested_window;
+    bool requested_options = xopt.max_blksize != SEGSIZE || requested_window;
     uint16_t opcode;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
@@ -311,7 +306,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     }
     initial_packet = xmalloc(TFTP_XFER_MAX_PACKET_SIZE);
     ap = (struct tftphdr *)ackbuf;
-    size = makerequest(RRQ, name, ap, mode, blocksize, requested_window,
+    size = makerequest(RRQ, name, ap, mode, xopt.max_blksize, requested_window,
                        TFTP_XFER_MAX_PACKET_SIZE);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
@@ -322,9 +317,9 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
 
     /* RFC 7440 peers answer with OACK; legacy peers start with DATA 1. */
     for (;;) {
-        timeout = (unsigned long)rexmtval * USEC_PER_SEC;
+        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
         (void)sigsetjmp(timeoutbuf, 1);
-        if (trace)
+        if (copt.trace)
             tpacket("sent", ap, size);
         if (sendto(f, ap, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
             perror("tftp: sendto");
@@ -343,7 +338,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
         if (n < 2)
             goto wait_for_reply;
         opcode = ntohs(initial_packet->th_opcode);
-        if (trace)
+        if (copt.trace)
             tpacket("received", initial_packet, n);
         if (opcode == ERROR) {
             printf("Error code %d: %s\n",
@@ -352,7 +347,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
             goto abort;
         }
         if (requested_options && opcode == OACK) {
-            if (!parse_oack(initial_packet, n, blocksize, requested_window,
+            if (!parse_oack(initial_packet, n, xopt.max_blksize, requested_window,
                             &negotiated_block, &negotiated_window)) {
                 nak(EOPTNEG, "Invalid option response");
                 err = EX_PROTOCOL;
@@ -611,7 +606,7 @@ static void nak(int error, const char *msg)
     memcpy(tp->th_msg, msg, length);
     length += 4;                /* Add space for header */
 
-    if (trace)
+    if (copt.trace)
         tpacket("sent", tp, length);
     if (sendto(f, ackbuf, length, 0, &peeraddr.sa,
                sizeof peeraddr) != length)
@@ -684,7 +679,7 @@ static bool print_with_suffix(double val, unsigned int flags)
     int decimals;
     bool with_suffix = false;
 
-    if (verbose < 2) {
+    if (copt.verbose < 2) {
         while (val >= divisor && suffix[1]) {
             suffix++;
             val /= divisor;
@@ -707,13 +702,13 @@ static bool print_with_suffix(double val, unsigned int flags)
 
 static void printstats(const char *direction, uintmax_t amount)
 {
-    if (verbose) {
+    if (copt.verbose) {
         double delta = (tstop - tstart) * 1.0e-6;
         bool with_suffix;
 
         fputs(direction, stdout);
         putchar(' ');
-        if (verbose > 1 || amount < 9999) {
+        if (copt.verbose > 1 || amount < 9999) {
             printf("%" PRIuMAX " bytes", amount);
         } else {
             with_suffix = print_with_suffix(amount, PWS_EXACT);
@@ -737,7 +732,7 @@ static void timer(int sig)
     (void)sig;                  /* Shut up unused warning */
 
     timeout <<= 1;
-    if (timeout >= (unsigned long)maxtimeout * USEC_PER_SEC) {
+    if (timeout >= (unsigned long)copt.maxtimeout * USEC_PER_SEC) {
         printf("Transfer timed out.\n");
         errno = save_errno;
         siglongjmp(toplevel, EX_TEMPFAIL);

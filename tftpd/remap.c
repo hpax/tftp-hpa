@@ -14,12 +14,11 @@
 
 #include "config.h"             /* Must be included first! */
 #include "tftpd.h"
+#include "options.h"
 #include "remap.h"
 
 #include <ctype.h>
 #include <regex.h>
-
-#define DEADMAN_MAX_STEPS	4096    /* Timeout after this many steps */
 
 #define RULE_REWRITE	0x01    /* This is a rewrite rule */
 #define RULE_GLOBAL	0x02    /* Global rule (repeat until no match) */
@@ -40,8 +39,6 @@
 #define RULE_NOREGEX	0x4000  /* The rule has no regular expression */
 
 #define RULE_HAS_REGEX(x) (!((x) & RULE_NOREGEX))
-
-int deadman_max_steps = DEADMAN_MAX_STEPS;
 
 #if defined(HAVE_WCHAR_H) && defined(HAVE_WCTYPE_H) && \
     defined(HAVE_MBRTOWC) && defined(HAVE_TOWLOWER)
@@ -597,13 +594,13 @@ char *rewrite_string(const struct formats *pf,
     const char *accerr;
     const struct rule *ruleptr = rules;
     regmatch_t pmatch[10];
-    int deadman = deadman_max_steps;
+    int deadman = dopt.map_steps;
     unsigned int bad_flags;
 
     /* Default error */
     *errmsg = "Remap table failure";
 
-    if (verbosity >= 3) {
+    if (dopt.verbosity >= 3) {
         tftpd_log(LOG_INFO, "remap: input: %s", current);
     }
 
@@ -637,7 +634,7 @@ char *rewrite_string(const struct formats *pf,
         if (!was_match)
             goto nextrule;      /* Rule did not match */
 
-        if (verbosity >= 5) {
+        if (dopt.verbosity >= 5) {
             tftpd_log(LOG_INFO, "remap: line %u: hit on %s%.*s%s, replacement: \"%s\"",
                       ruleptr->line,
                       inverse ? "~" : "\"",
@@ -667,7 +664,7 @@ char *rewrite_string(const struct formats *pf,
                     return NULL;
                 }
 
-                if (verbosity >= 4) {
+                if (dopt.verbosity >= 4) {
                     tftpd_log(LOG_INFO, "remap: line %u: rewrite step: \"%.*s\" -> \"%.*s\" [%d]",
                               ruleptr->line,
                               pmatch[0].rm_eo - pmatch[0].rm_so, newstr + gg0,
@@ -699,7 +696,7 @@ char *rewrite_string(const struct formats *pf,
 
         if ((ruleptr->rule_flags & RULE_HASFILE) &&
             pf->f_validate(newstr, mode, pf, &accerr)) {
-            if (verbosity >= 3) {
+            if (dopt.verbosity >= 3) {
                 tftpd_log(LOG_INFO, "remap: line %u: ignoring %s (%s)",
                        ruleptr->line, whatami, accerr);
             }
@@ -711,7 +708,7 @@ char *rewrite_string(const struct formats *pf,
         } else if (newstr != current) {
             xfree(current);
             current = newstr;
-            if (verbosity >= 3) {
+            if (dopt.verbosity >= 3) {
                 tftpd_log(LOG_INFO, "remap: line %u: rewrite result: %s",
                        ruleptr->line, current);
             }
@@ -731,7 +728,7 @@ char *rewrite_string(const struct formats *pf,
         }
 
         if (ruleptr->rule_flags & RULE_ABORT) {
-            if (verbosity >= 3) {
+            if (dopt.verbosity >= 3) {
                 tftpd_log(LOG_INFO, "remap: line %u: abort: %s",
                        ruleptr->line, current);
             }
@@ -742,7 +739,7 @@ char *rewrite_string(const struct formats *pf,
         }
 
         if (ruleptr->rule_flags & (RULE_EXIT|RULE_HASFILE)) {
-                if (verbosity >= 3) {
+                if (dopt.verbosity >= 3) {
                     tftpd_log(LOG_INFO, "remap: line %u: exit",
                            ruleptr->line);
             }
@@ -770,7 +767,7 @@ char *rewrite_string(const struct formats *pf,
             }
         }
 
-        if (verbosity >= 3) {
+        if (dopt.verbosity >= 3) {
             if (next != ruleptr->next) {
                 if ((next->rule_flags & RULE_LABEL) && next->pattern[0]) {
                     tftpd_log(LOG_INFO, "remap: line %u: jump to %s",
@@ -786,7 +783,7 @@ char *rewrite_string(const struct formats *pf,
         ruleptr = next;
     }
 
-    if (verbosity >= 3) {
+    if (dopt.verbosity >= 3) {
         tftpd_log(LOG_INFO, "remap: done: %s", current);
     }
     return current;
@@ -794,7 +791,7 @@ char *rewrite_string(const struct formats *pf,
 dead:                           /* Deadman expired */
     tftpd_log(LOG_ERR,
            "remap: Breaking loop after %d steps, input = %s, last = %s",
-           deadman_max_steps, input, newstr);
+           dopt.map_steps, input, newstr);
 quit:
     if (newstr != current)
         xfree(newstr);

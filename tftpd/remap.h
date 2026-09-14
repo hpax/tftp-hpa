@@ -43,8 +43,5 @@ char *rewrite_string(const struct formats *, const char *,
 		     const struct rule *, int, int,
                      match_pattern_callback, const char **);
 
-/* Remapping deadman counter */
-extern int deadman_max_steps;
-
 #endif                          /* WITH_REGEX */
 #endif                          /* TFTPD_REMAP_H */

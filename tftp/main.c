@@ -7,6 +7,7 @@
  */
 
 #include "common/tftpsubs.h"
+#include "options.h"
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
 
@@ -51,23 +52,25 @@ static const struct modes modes[] = {
 #define MODE_NETASCII (&modes[0])
 #define MODE_DEFAULT  MODE_NETASCII
 
+struct tftp_options copt = {
+    .mode = MODE_DEFAULT,
+    .rexmtval = TIMEOUT,
+    .maxtimeout = TIMEOUT_LIMIT * TIMEOUT
+};
+
+struct common_options xopt = {
 #ifdef HAVE_IPV6
-static int ai_fam = AF_UNSPEC;
-static int ai_fam_sock = AF_UNSPEC;
+    .ai_fam = AF_UNSPEC,
 #else
-static int ai_fam = AF_INET;
-static int ai_fam_sock = AF_INET;
+    .ai_fam = AF_INET,
 #endif
+    .max_blksize = SEGSIZE
+};
 
 union sock_addr peeraddr;
 int f = -1;
 static uint16_t port;
-bool trace;
-int verbose;
-static bool literal;
 static bool connected;
-static bool iscmd;
-static const struct modes *mode;
 #ifdef WITH_READLINE
 static char *line = NULL;
 #else
@@ -80,11 +83,12 @@ static const char *const prompt = "tftp> ";
 sigjmp_buf toplevel;
 static void intr(int);
 static const struct servent *sp;
-static bool portrange;
-static unsigned int portrange_from = 0;
-static unsigned int portrange_to = 0;
-unsigned int blocksize = SEGSIZE;
-unsigned int windowsize;
+
+#ifdef HAVE_IPV6
+static int ai_fam_sock = AF_UNSPEC;
+#else
+static int ai_fam_sock = AF_INET;
+#endif
 
 static int get(int, char **);
 static int help(int, char **);
@@ -256,12 +260,12 @@ int main(int argc, char *argv[])
     set_progname(argv[0]);
     random_init();
 
-    mode = MODE_DEFAULT;
+    copt.mode = MODE_DEFAULT;
 
     peerargv[0] = argv[0];
     peerargc = 1;
 
-    while (!iscmd) {
+    while (!copt.iscmd) {
         optc = getopt_long(argc, argv, short_options, long_options,
                            NULL);
         if (optc == -1) {
@@ -275,11 +279,11 @@ int main(int argc, char *argv[])
 
         switch (optc) {
         case '4':
-            ai_fam = AF_INET;
+            xopt.ai_fam = AF_INET;
             break;
         case '6':
 #ifdef HAVE_IPV6
-            ai_fam = AF_INET6;
+            xopt.ai_fam = AF_INET6;
 #else
             fprintf(stderr, "%s: this version compiled without IPv6 support\n",
                     _progname);
@@ -290,7 +294,7 @@ int main(int argc, char *argv[])
             if (optarg && *optarg) {
                 set_verbosity(optarg, true);
             } else {
-                verbose++;
+                copt.verbose++;
             }
             break;
         case 'V':
@@ -304,7 +308,7 @@ int main(int argc, char *argv[])
             settftpmode(MODE_NETASCII);
             break;
         case 'l':
-            literal = true;
+            copt.literal = true;
             break;
         case 'm':
         {
@@ -323,19 +327,21 @@ int main(int argc, char *argv[])
             break;
         }
         case 'c':
-            iscmd = true;
+            copt.iscmd = true;
             break;
         case 'R':
-            if (sscanf(optarg, "%u:%u", &portrange_from, &portrange_to) != 2
-                || !portrange_from || portrange_from > portrange_to
-                || portrange_to > 65535) {
+            if (sscanf(optarg, "%u:%u", &xopt.portrange_from,
+                       &xopt.portrange_to) != 2 ||
+                !xopt.portrange_from ||
+                xopt.portrange_from > xopt.portrange_to ||
+                xopt.portrange_to > 65535) {
                 fprintf(stderr, "Bad port range: %s\n", optarg);
                 exit(EX_USAGE);
             }
-            portrange = true;
             break;
         case 'B':
-            if (!parse_uint_range(optarg, 8, MAX_SEGSIZE, &blocksize)) {
+            if (!parse_uint_range(optarg, 8, MAX_SEGSIZE,
+                                  &xopt.max_blksize)) {
                 fprintf(stderr, "Bad block size: %s (8-%d)\n", optarg,
                         MAX_SEGSIZE);
                 exit(EX_USAGE);
@@ -344,7 +350,7 @@ int main(int argc, char *argv[])
         case 'W':
         case 'w':
             if (!parse_uint_range(optarg, 1, TFTP_MAX_WINDOWSIZE,
-                                  &windowsize)) {
+                                  &xopt.max_windowsize)) {
                 fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
                         optarg, TFTP_MAX_WINDOWSIZE);
                 exit(EX_USAGE);
@@ -358,7 +364,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    ai_fam_sock = ai_fam;
+    ai_fam_sock = xopt.ai_fam;
 
     pargv = argv + optind;
     pargc = argc - optind;
@@ -368,7 +374,7 @@ int main(int argc, char *argv[])
         struct servent *fallback_sp;
 
         /* Use canned values */
-        if (verbose)
+        if (copt.verbose)
             fprintf(stderr,
                     "tftp: tftp/udp: unknown service, faking it...\n");
         fallback_sp = xmalloc(sizeof(*fallback_sp));
@@ -380,7 +386,7 @@ int main(int argc, char *argv[])
     }
 
     /* Allow SIGINT in non-interactive mode to terminate the program */
-    if (!iscmd)
+    if (!copt.iscmd)
         tftp_signal(SIGINT, intr, 0);
 
     if (peerargc > 1) {
@@ -400,12 +406,12 @@ int main(int argc, char *argv[])
     }
     bzero(&sa, sizeof(sa));
     sa.sa.sa_family = ai_fam_sock;
-    if (pick_port_bind(f, &sa, portrange_from, portrange_to)) {
+    if (pick_port_bind(f, &sa, xopt.portrange_from, xopt.portrange_to)) {
         perror("tftp: bind");
         exit(EX_OSERR);
     }
 
-    if (iscmd) {
+    if (copt.iscmd) {
         /* -c specified; execute command and exit */
         const struct cmd *c;
         const char *errtype;
@@ -455,7 +461,7 @@ static char *hostname;
    the global variable "line" */
 static bool getmoreargs(const char *partial, const char *mprompt)
 {
-    if (iscmd)
+    if (copt.iscmd)
         return false;
 
 #ifdef WITH_READLINE
@@ -509,7 +515,7 @@ static int setpeer(int argc, char *argv[])
         return EX_USAGE;
     }
 
-    peeraddr.sa.sa_family = ai_fam;
+    peeraddr.sa.sa_family = xopt.ai_fam;
     err = set_sock_addr(argv[1], &peeraddr, &hostname, false);
     if (err) {
         printf("Error: %s\n", gai_strerror(err));
@@ -517,15 +523,15 @@ static int setpeer(int argc, char *argv[])
         connected = false;
         return EX_NOHOST;
     }
-    ai_fam = peeraddr.sa.sa_family;
+    xopt.ai_fam = peeraddr.sa.sa_family;
     if (f == -1) { /* socket not open */
-        ai_fam_sock = ai_fam;
+        ai_fam_sock = xopt.ai_fam;
     } else { /* socket was already open */
-        if (ai_fam_sock != ai_fam) { /* need reopen socken for new family */
+        if (ai_fam_sock != xopt.ai_fam) { /* need reopen socken for new family */
             union sock_addr sa;
 
             close(f);
-            ai_fam_sock = ai_fam;
+            ai_fam_sock = xopt.ai_fam;
             f = socket(ai_fam_sock, SOCK_DGRAM, 0);
             if (f < 0) {
                 perror("tftp: socket");
@@ -533,7 +539,8 @@ static int setpeer(int argc, char *argv[])
             }
             bzero((char *)&sa, sizeof (sa));
             sa.sa.sa_family = ai_fam_sock;
-            if (pick_port_bind(f, &sa, portrange_from, portrange_to)) {
+            if (pick_port_bind(f, &sa, xopt.portrange_from,
+                               xopt.portrange_to)) {
                 perror("tftp: bind");
                 exit(EX_OSERR);
             }
@@ -558,7 +565,7 @@ static int setpeer(int argc, char *argv[])
         }
     }
 
-    if (verbose) {
+    if (copt.verbose) {
         char tmp[INET6_ADDRSTRLEN];
         const char *tp;
         tp = inet_ntop(peeraddr.sa.sa_family, SOCKADDR_P(&peeraddr),
@@ -578,7 +585,7 @@ static int modecmd(int argc, char *argv[])
     const char *sep;
 
     if (argc < 2) {
-        printf("Using %s mode to transfer files.\n", mode->m_mode);
+        printf("Using %s mode to transfer files.\n", copt.mode->m_mode);
         return 0;
     }
     if (argc == 2) {
@@ -622,9 +629,9 @@ static int setascii(int argc, char *argv[])
 
 static void settftpmode(const struct modes *newmode)
 {
-    mode = newmode;
-    if (verbose)
-        printf("mode set to %s\n", mode->m_mode);
+    copt.mode = newmode;
+    if (copt.verbose)
+        printf("mode set to %s\n", copt.mode->m_mode);
 }
 
 /*
@@ -649,7 +656,7 @@ static int put(int argc, char *argv[])
         return EX_USAGE;
     }
     targ = argv[argc - 1];
-    if (!literal && strchr(argv[argc - 1], ':')) {
+    if (!copt.literal && strchr(argv[argc - 1], ':')) {
         for (n = 1; n < argc - 1; n++)
             if (strchr(argv[n], ':')) {
                 putusage(argv[0]);
@@ -658,7 +665,7 @@ static int put(int argc, char *argv[])
         cp = argv[argc - 1];
         targ = strchr(cp, ':');
         *targ++ = 0;
-        peeraddr.sa.sa_family = ai_fam;
+        peeraddr.sa.sa_family = xopt.ai_fam;
         err = set_sock_addr(cp, &peeraddr, &hostname, false);
         if (err) {
             printf("Error: %s\n", gai_strerror(err));
@@ -666,7 +673,7 @@ static int put(int argc, char *argv[])
             connected = false;
             return EX_NOHOST;
         }
-        ai_fam = peeraddr.sa.sa_family;
+        xopt.ai_fam = peeraddr.sa.sa_family;
         connected = true;
     }
     if (!connected) {
@@ -675,17 +682,18 @@ static int put(int argc, char *argv[])
     }
     if (argc < 4) {
         cp = argc == 2 ? tail(targ) : argv[1];
-        fd = open(cp, O_RDONLY | mode->m_openflags);
+        fd = open(cp, O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
             fprintf(stderr, "tftp: ");
             perror(cp);
             return EX_OSERR;
         }
-        if (verbose)
+        if (copt.verbose)
             printf("putting %s to %s:%s [%s]\n",
-                   cp, hostname, targ, mode->m_mode);
+                   cp, hostname, targ, copt.mode->m_mode);
         sa_set_port(&peeraddr, port);
-        return tftp_sendfile(fd, targ, mode->m_mode, windowsize);
+        return tftp_sendfile(fd, targ, copt.mode->m_mode,
+                             xopt.max_windowsize);
     }
     /* this assumes the target is a directory */
     /* on a remote unix system.  hmmmm.  */
@@ -695,7 +703,7 @@ static int put(int argc, char *argv[])
         char *remotepath = xmalloc(strlen(targ) + 1 + strlen(base) + 1);
 
         sprintf(remotepath, "%s/%s", targ, base);
-        fd = open(argv[n], O_RDONLY | mode->m_openflags);
+        fd = open(argv[n], O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
             fprintf(stderr, "tftp: ");
             perror(argv[n]);
@@ -704,11 +712,12 @@ static int put(int argc, char *argv[])
                 err = EX_OSERR;
             continue;
         }
-        if (verbose)
+        if (copt.verbose)
             printf("putting %s to %s:%s [%s]\n",
-                   argv[n], hostname, remotepath, mode->m_mode);
+                   argv[n], hostname, remotepath, copt.mode->m_mode);
         sa_set_port(&peeraddr, port);
-        n = tftp_sendfile(fd, remotepath, mode->m_mode, windowsize);
+        n = tftp_sendfile(fd, remotepath, copt.mode->m_mode,
+                          xopt.max_windowsize);
         if (!err)
             err = n;
         free(remotepath);
@@ -745,7 +754,7 @@ static int get(int argc, char *argv[])
     }
     if (!connected) {
         for (n = 1; n < argc; n++)
-            if (literal || strchr(argv[n], ':') == 0) {
+            if (copt.literal || strchr(argv[n], ':') == 0) {
                 getusage(argv[0]);
                 return EX_USAGE;
             }
@@ -753,13 +762,13 @@ static int get(int argc, char *argv[])
     err = 0;
     for (n = 1; n < argc; n++) {
         src = strchr(argv[n], ':');
-        if (literal || src == NULL)
+        if (copt.literal || src == NULL)
             src = argv[n];
         else {
             int resolve_error;
 
             *src++ = 0;
-            peeraddr.sa.sa_family = ai_fam;
+            peeraddr.sa.sa_family = xopt.ai_fam;
             resolve_error = set_sock_addr(argv[n], &peeraddr, &hostname, false);
             if (resolve_error) {
                 printf("Warning: %s\n", gai_strerror(resolve_error));
@@ -768,27 +777,28 @@ static int get(int argc, char *argv[])
                     err = EX_NOHOST;
                 continue;
             }
-            ai_fam = peeraddr.sa.sa_family;
+            xopt.ai_fam = peeraddr.sa.sa_family;
             connected = true;
         }
         if (argc < 4) {
             cp = argc == 3 ? argv[2] : tail(src);
-            fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | mode->m_openflags,
+            fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                       0666);
             if (fd < 0) {
                 fprintf(stderr, "tftp: ");
                 perror(cp);
                 return EX_OSERR;
             }
-            if (verbose)
+            if (copt.verbose)
                 printf("getting from %s:%s to %s [%s]\n",
-                       hostname, src, cp, mode->m_mode);
+                       hostname, src, cp, copt.mode->m_mode);
             sa_set_port(&peeraddr, port);
-            err = tftp_recvfile(fd, src, mode->m_mode, windowsize);
+            err = tftp_recvfile(fd, src, copt.mode->m_mode,
+                                xopt.max_windowsize);
             break;
         }
         cp = tail(src);         /* new .. jdg */
-        fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | mode->m_openflags,
+        fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                   0666);
         if (fd < 0) {
             fprintf(stderr, "tftp: ");
@@ -797,11 +807,12 @@ static int get(int argc, char *argv[])
                 err = EX_OSERR;
             continue;
         }
-        if (verbose)
+        if (copt.verbose)
             printf("getting from %s:%s to %s [%s]\n",
-                   hostname, src, cp, mode->m_mode);
+                   hostname, src, cp, copt.mode->m_mode);
         sa_set_port(&peeraddr, port);
-        n = tftp_recvfile(fd, src, mode->m_mode, windowsize);
+        n = tftp_recvfile(fd, src, copt.mode->m_mode,
+                          xopt.max_windowsize);
         if (!err)
             err = n;
     }
@@ -813,9 +824,6 @@ static void getusage(const char *s)
     printf("usage: %s host:file host:file ... file, or\n", s);
     printf("       %s file file ... file if connected\n", s);
 }
-
-int rexmtval = TIMEOUT;
-int maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
 
 static int setrexmt(int argc, char *argv[])
 {
@@ -836,8 +844,8 @@ static int setrexmt(int argc, char *argv[])
         printf("%s: bad value\n", argv[1]);
         return EX_USAGE;
     } else {
-        rexmtval = t;
-        maxtimeout = rexmtval * TIMEOUT_LIMIT;
+        copt.rexmtval = t;
+        copt.maxtimeout = copt.rexmtval * TIMEOUT_LIMIT;
     }
     return 0;
 }
@@ -861,7 +869,7 @@ static int settimeout(int argc, char *argv[])
         printf("%s: bad value\n", argv[1]);
         return EX_USAGE;
     } else
-        maxtimeout = t;
+        copt.maxtimeout = t;
     return 0;
 }
 
@@ -877,7 +885,7 @@ static int setblocksize(int argc, char *argv[])
         printf("usage: %s size\n", argv[0]);
         return EX_USAGE;
     }
-    if (!parse_uint_range(argv[1], 8, MAX_SEGSIZE, &blocksize)) {
+    if (!parse_uint_range(argv[1], 8, MAX_SEGSIZE, &xopt.max_blksize)) {
         printf("%s: bad block size (valid range is 8-%d)\n",
                argv[1], MAX_SEGSIZE);
         return EX_USAGE;
@@ -897,7 +905,8 @@ static int setwindowsize(int argc, char *argv[])
         printf("usage: %s size\n", argv[0]);
         return EX_USAGE;
     }
-    if (!parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE, &windowsize)) {
+    if (!parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE,
+                          &xopt.max_windowsize)) {
         printf("%s: bad window size (valid range is 1-%u)\n",
                argv[1], TFTP_MAX_WINDOWSIZE);
         return EX_USAGE;
@@ -909,8 +918,8 @@ static int setliteral(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
-    literal = !literal;
-    printf("Literal mode %s.\n", literal ? "on" : "off");
+    copt.literal = !copt.literal;
+    printf("Literal mode %s.\n", copt.literal ? "on" : "off");
     return 0;
 }
 
@@ -922,13 +931,13 @@ static int status(int argc, char *argv[])
         printf("Connected to %s.\n", hostname);
     else
         printf("Not connected.\n");
-    printf("Mode: %s Verbose: %s Tracing: %s Literal: %s\n", mode->m_mode,
-           verbose ? "on" : "off", trace ? "on" : "off",
-           literal ? "on" : "off");
+    printf("Mode: %s Verbose: %s Tracing: %s Literal: %s\n", copt.mode->m_mode,
+           copt.verbose ? "on" : "off", copt.trace ? "on" : "off",
+           copt.literal ? "on" : "off");
     printf("Rexmt-interval: %d seconds, Max-timeout: %d seconds\n",
-           rexmtval, maxtimeout);
-    printf("Blocksize: %u, windowsize: %u\n", blocksize,
-           windowsize ? windowsize : 1);
+           copt.rexmtval, copt.maxtimeout);
+    printf("Blocksize: %u, windowsize: %u\n", xopt.max_blksize,
+           xopt.max_windowsize ? xopt.max_windowsize : 1);
     return 0;
 }
 
@@ -1117,8 +1126,8 @@ static int settrace(int argc, char *argv[])
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
 
-    trace = !trace;
-    printf("Packet tracing %s.\n", trace ? "on" : "off");
+    copt.trace = !copt.trace;
+    printf("Packet tracing %s.\n", copt.trace ? "on" : "off");
     return 0;
 }
 
@@ -1130,7 +1139,7 @@ static int set_verbosity(const char *to, bool startup)
         char *ep;
         long v = strtol(to, &ep, 0);
         if (*to && !*ep && v == (int)v) {
-            verbose = v;
+            copt.verbose = v;
         } else {
             if (startup) {
                 fprintf(stderr, "%s: invalid verbosity level: %s\n",
@@ -1142,10 +1151,10 @@ static int set_verbosity(const char *to, bool startup)
             }
         }
     } else {
-        verbose = !verbose;
+        copt.verbose = !copt.verbose;
     }
 
-    switch (verbose) {
+    switch (copt.verbose) {
     case 0:
         name = "off";
         break;
@@ -1153,12 +1162,12 @@ static int set_verbosity(const char *to, bool startup)
         name = "on";
         break;
     default:
-        name = (verbose < 0) ? "quiet" : "high";
+        name = (copt.verbose < 0) ? "quiet" : "high";
         break;
     }
 
     if (!startup)
-        printf("Verbosity set to level %d (%s).\n", verbose, name);
+        printf("Verbosity set to level %d (%s).\n", copt.verbose, name);
     return 0;
 }
 

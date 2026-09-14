@@ -12,6 +12,7 @@
 #include "tftpd.h"
 #include "path.h"
 #include "strlist.h"
+#include "options.h"
 
 /*
  * Trivial file transfer protocol server.
@@ -36,12 +37,6 @@
 #include <sys/filio.h>          /* Necessary for FIONBIO on Solaris */
 #endif
 
-#ifdef HAVE_IPV6
-static sa_family_t ai_fam = AF_UNSPEC;
-#else
-static sa_family_t ai_fam = AF_INET;
-#endif
-
 #define	TIMEOUT 1000000         /* Default timeout (us) */
 #define TRIES   6               /* Number of attempts to send each packet */
 #define TIMEOUT_LIMIT ((1 << TRIES)-1)
@@ -57,9 +52,6 @@ static bool timeout_quit;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static uint16_t rollover_val = 0;
-static const char *path_prefix = NULL;
-static bool rooted = false;
-
 #define	PKTSIZE	(MAX_SEGSIZE + 4)
 #define IO_RING_MIN_BYTES (256U * 1024U)
 #define MAX_MAX_WINDOWSIZE	32768	/* More than this gets dangerous */
@@ -74,9 +66,6 @@ static bool rooted = false;
 #endif
 static char *buf;
 static char *ackbuf;
-static unsigned int max_blksize = MAX_SEGSIZE;
-static unsigned int max_windowsize = MAX_WINDOWSIZE;
-static uintmax_t max_windowbytes = MAX_WINDOWBYTES;
 static unsigned int windowsize = 1;
 static uintmax_t requested_windowsize;
 
@@ -85,16 +74,24 @@ static const char *from_str = "<client>";
 static off_t tsize;
 static bool tsize_ok;
 
-static int ndirs;
-static const char * const **dirs;
+struct daemon_options dopt = {
+    .max_windowbytes = MAX_WINDOWBYTES,
+    .rexmtval = TIMEOUT,
+    .map_steps = DAEMON_DEFAULT_MAP_STEPS,
+    .waittime = -1,
+    .service = "tftp",
+    .user = "nobody"
+};
 
-static bool secure;
-static bool cancreate;
-static bool unixperms;
-static bool portrange;
-static bool reject_all_options;
-static unsigned int portrange_from, portrange_to;
-int verbosity = 0;
+struct common_options xopt = {
+#ifdef HAVE_IPV6
+    .ai_fam = AF_UNSPEC,
+#else
+    .ai_fam = AF_INET,
+#endif
+    .max_blksize = MAX_SEGSIZE,
+    .max_windowsize = MAX_WINDOWSIZE
+};
 
 #ifdef WITH_REGEX
 static struct rule *rewrite_rules = NULL;
@@ -119,11 +116,11 @@ static bool set_utimeout(uintmax_t *);
 static bool set_rollover(uintmax_t *);
 static bool set_windowsize(uintmax_t *);
 
-struct options {
-    const char *o_opt;
-    bool (*o_fnc)(uintmax_t *);
+struct daemon_protocol_option {
+    const char *name;
+    bool (*handler)(uintmax_t *);
 };
-static struct options options[] = {
+static struct daemon_protocol_option protocol_options[] = {
     {"blksize",  set_blksize},
     {"blksize2", set_blksize2},
     {"tsize",    set_tsize},
@@ -440,32 +437,18 @@ int main(int argc, char **argv)
 {
     struct tftphdr *tp;
     struct passwd *pw;
-    struct options *opt;
+    struct daemon_protocol_option *opt;
     union sock_addr myaddr;
     int n;
     int fd = -1;
-    bool standalone = false;    /* Standalone (listen) mode */
-    bool nodaemon = false;      /* Do not detach process */
-    bool systemd = false;       /* Not using systemd socket activation */
     pid_t pid;
-    mode_t my_umask = 0;
-    bool spec_umask = false;
     int c;
     int setrv;
     int die;
-    intmax_t waittime = -1;      /* No waittime specified (yet) */
-    const char *user = "nobody";   /* Default user */
     char *ep;
-    bool use_stderr = false;
-    const char *map_test_file = NULL;
-#ifdef WITH_REGEX
-    char *rewrite_file = NULL;
-#endif
-    const char *pidfile = NULL;
     uint16_t tp_opcode;
     bool patherr;
     pollset_cursor cursor;
-    struct strlist listen_addrs;
     int nullfd;
 
 #ifdef HAVE_LOCALE_H
@@ -482,7 +465,7 @@ int main(int argc, char **argv)
     listen_set = pollset_new();
     atexit(close_listen_set);
 
-    strlist_init(&listen_addrs);
+    strlist_init(&dopt.listen_addrs);
 
     /*
      * This creates a /dev/null file descriptor, and backfills any
@@ -499,48 +482,49 @@ int main(int argc, char **argv)
            != -1)
         switch (c) {
         case '4':
-            ai_fam = AF_INET;
+            xopt.ai_fam = AF_INET;
             break;
 #ifdef HAVE_IPV6
         case '6':
-            ai_fam = AF_INET6;
+            xopt.ai_fam = AF_INET6;
             break;
 #endif
         case 'c':
-            cancreate = true;
+            dopt.cancreate = true;
             break;
         case 's':
-            secure = true;
+            dopt.secure = true;
             break;
         case 'p':
-            unixperms = true;
+            dopt.unixperms = true;
             break;
         case 'l':
-            standalone = true;
+            dopt.standalone = true;
             break;
         case 'L':
-            standalone = true;
-            nodaemon = true;
+            dopt.standalone = true;
+            dopt.nodaemon = true;
             break;
         case 'a':
-            standalone = true;
-            strlist_add(&listen_addrs, optarg);
+            dopt.standalone = true;
+            strlist_add(&dopt.listen_addrs, optarg);
             break;
         case 't':
-            waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
+            dopt.waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
             break;
         case 'S':
             if (!optarg || !*optarg) {
                 tftpd_log(LOG_ERR, "Missing service name");
                 exit(EX_USAGE);
             }
-            default_service = optarg;
+            dopt.service = optarg;
             break;
         case 'B':
             {
                 char *vp;
-                max_blksize = (unsigned int)strtoul(optarg, &vp, 10);
-                if (max_blksize < 512 || max_blksize > MAX_SEGSIZE || *vp) {
+                xopt.max_blksize = (unsigned int)strtoul(optarg, &vp, 10);
+                if (xopt.max_blksize < 512 ||
+                    xopt.max_blksize > MAX_SEGSIZE || *vp) {
                     tftpd_log(LOG_ERR,
                            "Bad maximum blocksize value (range 512-%d): %s",
                            MAX_SEGSIZE, optarg);
@@ -569,7 +553,7 @@ int main(int argc, char **argv)
                               "(valid range 1-%u, capping at %ld)",
                               optarg, (unsigned int)MAX_MAX_WINDOWSIZE, value);
                 }
-                max_windowsize = (unsigned int)value;
+                xopt.max_windowsize = (unsigned int)value;
             }
             break;
         case OPT_WINDOW_BYTES:
@@ -577,7 +561,7 @@ int main(int argc, char **argv)
                 char *vp;
 
                 errno = 0;
-                max_windowbytes = strtoumax(optarg, &vp, 10);
+                dopt.max_windowbytes = strtoumax(optarg, &vp, 10);
                 if (errno || *optarg == '\0' || *vp) {
                     tftpd_log(LOG_ERR, "Bad window-bytes value: %s", optarg);
                     exit(EX_USAGE);
@@ -592,63 +576,60 @@ int main(int argc, char **argv)
                     tftpd_log(LOG_ERR, "Bad timeout value: %s", optarg);
                     exit(EX_USAGE);
                 }
-                rexmtval = timeout = tov;
-                maxtimeout = rexmtval * TIMEOUT_LIMIT;
+                dopt.rexmtval = tov;
             }
             break;
         case 'R':
-            {
-                if (sscanf(optarg, "%u:%u", &portrange_from, &portrange_to)
-                    != 2 || portrange_from > portrange_to
-                    || portrange_to >= 65535) {
-                    tftpd_log(LOG_ERR, "Bad port range: %s", optarg);
-                    exit(EX_USAGE);
-                }
-                portrange = true;
+            if (sscanf(optarg, "%u:%u", &xopt.portrange_from,
+                       &xopt.portrange_to) != 2 ||
+                xopt.portrange_from > xopt.portrange_to ||
+                xopt.portrange_to >= 65535) {
+                tftpd_log(LOG_ERR, "Bad port range: %s", optarg);
+                exit(EX_USAGE);
             }
             break;
         case '/':
-            rooted = true;
+            dopt.rooted = true;
             break;
         case 'u':
-            user = optarg;
+            dopt.user = optarg;
             break;
         case 'U':
-            my_umask = strtoul(optarg, &ep, 8);
+            dopt.my_umask = strtoul(optarg, &ep, 8);
             if (*ep) {
                 tftpd_log(LOG_ERR, "Invalid umask: %s", optarg);
                 exit(EX_USAGE);
             }
-            spec_umask = true;
+            dopt.spec_umask = true;
             break;
         case 'r':
-            for (opt = options; opt->o_opt; opt++) {
-                if (!strcasecmp(optarg, opt->o_opt)) {
-                    opt->o_opt = "";    /* Don't support this option */
+            for (opt = protocol_options; opt->name; opt++) {
+                if (!strcasecmp(optarg, opt->name)) {
+                    opt->name = "";     /* Don't support this option */
                     break;
                 }
             }
-            if (!opt->o_opt) {
+            if (!opt->name) {
                 tftpd_log(LOG_ERR, "Unknown option: %s", optarg);
                 exit(EX_USAGE);
             }
             break;
         case OPT_REJECT_ALL:
-            reject_all_options = true;
+            dopt.reject_all_options = true;
             break;
 #ifdef WITH_REGEX
         case 'm':
-            if (rewrite_file) {
+            if (dopt.rewrite_file) {
                 tftpd_log(LOG_ERR, "Multiple -m options");
                 exit(EX_USAGE);
             }
-            rewrite_file = optarg;
+            dopt.rewrite_file = optarg;
             break;
         case OPT_MAP_STEPS:
         {
             unsigned long steps = strtoul(optarg, &ep, 0);
             if (*optarg && !*ep && steps > 0 && steps <= INT_MAX) {
-                deadman_max_steps = steps;
+                dopt.map_steps = steps;
             } else {
                 tftpd_log(LOG_ERR, "Bad --map-steps option: %s", optarg);
                 exit(EX_USAGE);
@@ -656,25 +637,25 @@ int main(int argc, char **argv)
             break;
         }
         case OPT_MAP_TEST:
-            map_test_file = optarg;
-            use_stderr = true;
+            dopt.map_test_file = optarg;
+            dopt.use_stderr = true;
             break;
 #endif
         case 'v':
-            verbosity++;
+            dopt.verbosity++;
             break;
         case OPT_VERBOSITY:
-            verbosity = atoi(optarg);
+            dopt.verbosity = atoi(optarg);
             break;
         case OPT_STDERR:
-            use_stderr = true;
+            dopt.use_stderr = true;
             break;
         case OPT_SYSTEMD:
-            nodaemon = true;
-            systemd = true;
+            dopt.nodaemon = true;
+            dopt.systemd = true;
             break;
         case OPT_PATH_PREFIX:
-            path_prefix = *optarg ? optarg : NULL;
+            dopt.path_prefix = *optarg ? optarg : NULL;
             break;
         case 'V':
             /* Print configuration to stdout and exit */
@@ -682,25 +663,28 @@ int main(int argc, char **argv)
             exit(0);
             break;
         case 'P':
-            pidfile = optarg;
+            dopt.pidfile = optarg;
             break;
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
             break;
         }
 
-    if (!use_stderr)
+    rexmtval = timeout = dopt.rexmtval;
+    maxtimeout = rexmtval * TIMEOUT_LIMIT;
+
+    if (!dopt.use_stderr)
         tftpd_openlog();
 
 #ifdef WITH_REGEX
-    if (rewrite_file)
-        rewrite_rules = read_remap_rules(rewrite_file);
+    if (dopt.rewrite_file)
+        rewrite_rules = read_remap_rules(dopt.rewrite_file);
 
-    if (map_test_file) {
-        FILE *tf = fopen(map_test_file, "r");
+    if (dopt.map_test_file) {
+        FILE *tf = fopen(dopt.map_test_file, "r");
         if (!tf) {
             tftpd_log(LOG_ERR, "%s: cannot open map test file: %s",
-                      map_test_file, strerror(errno));
+                      dopt.map_test_file, strerror(errno));
             exit(EX_NOINPUT);
         }
         rewrite_test(tf);
@@ -709,45 +693,45 @@ int main(int argc, char **argv)
     }
 #endif
 
-    if (path_prefix) {
-        if (!is_directory(path_prefix)) {
+    if (dopt.path_prefix) {
+        if (!is_directory(dopt.path_prefix)) {
             tftpd_log(LOG_ERR, "%s: invalid path prefix: %s",
-                      path_prefix, strerror(errno));
+                      dopt.path_prefix, strerror(errno));
             exit(EX_DATAERR);
         }
     }
 
-    dirs = xmalloc((argc - optind + 1) * sizeof(char *));
+    dopt.dirs = xmalloc((argc - optind + 1) * sizeof(char *));
     patherr = false;
-    for (ndirs = 0; optind != argc; optind++) {
+    for (dopt.ndirs = 0; optind != argc; optind++) {
         const char *path = argv[optind];
-        const char * const *pathlist = parse_path(path, !secure);
+        const char * const *pathlist = parse_path(path, !dopt.secure);
         if (!pathlist) {
             tftpd_log(LOG_ERR, "invalid directory path: %s", path);
             patherr = true;
-        } else if (!pathlist[0] && !path_prefix) {
+        } else if (!pathlist[0] && !dopt.path_prefix) {
             tftpd_log(LOG_ERR, "/ as directory path requires --path-prefix");
             patherr = true;
         }
-        dirs[ndirs++] = pathlist;
+        dopt.dirs[dopt.ndirs++] = pathlist;
     }
-    dirs[ndirs] = NULL;
+    dopt.dirs[dopt.ndirs] = NULL;
 
     if (patherr)
         exit(EX_DATAERR);
 
-    if (!ndirs) {
+    if (!dopt.ndirs) {
         tftpd_log(LOG_ERR, "directory list not specified");
         exit(EX_USAGE);
     }
 
-    if (secure) {
-        if (ndirs != 1) {
+    if (dopt.secure) {
+        if (dopt.ndirs != 1) {
             tftpd_log(LOG_ERR, "-s requires exactly one directory");
             exit(EX_USAGE);
         }
 
-        char *securepath = build_path(path_prefix, dirs[0]);
+        char *securepath = build_path(dopt.path_prefix, dopt.dirs[0]);
         if (chdir(securepath)) {
             tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
             exit(EX_NOINPUT);
@@ -755,15 +739,15 @@ int main(int argc, char **argv)
         free(securepath);
     }
 
-    pw = getpwnam(user);
+    pw = getpwnam(dopt.user);
     if (!pw) {
-        tftpd_log(LOG_ERR, "no user %s: %s", user, strerror(errno));
+        tftpd_log(LOG_ERR, "no user %s: %s", dopt.user, strerror(errno));
         exit(EX_NOUSER);
     }
 
-    if (pidfile && !standalone) {
+    if (dopt.pidfile && !dopt.standalone) {
         tftpd_log(LOG_WARNING, "not in standalone mode, ignoring pid file");
-        pidfile = NULL;
+        dopt.pidfile = NULL;
     }
 
     /*
@@ -772,24 +756,24 @@ int main(int argc, char **argv)
      *
      * If a wait time of 0 is specified, set it to infinite.
      */
-    if (waittime < 0)
-        waittime = standalone ? -1 : DEFAULT_WAITTIME;
-    else if (!waittime)
-        waittime = -1;
+    if (dopt.waittime < 0)
+        dopt.waittime = dopt.standalone ? -1 : DEFAULT_WAITTIME;
+    else if (!dopt.waittime)
+        dopt.waittime = -1;
 
     /*
      * If we're running standalone, open the listening sockets,
      * daemonize the process and add a pid file if requested.
      */
-    if (standalone || systemd) {
+    if (dopt.standalone || dopt.systemd) {
         struct liststr *ls;
 
-        if (systemd) {
+        if (dopt.systemd) {
             int startfd = 3;    /* Fixed by systemd protocol */
             long nfds = getenv_ulong("LISTEN_FDS");
             long listen_pid = getenv_ulong("LISTEN_PID");
 
-            if (standalone) {
+            if (dopt.standalone) {
                 tftpd_log(LOG_ERR, "--systemd is mutually exclusive with the --address, --standalone and --foreground options");
                 exit(EX_USAGE);
             }
@@ -803,14 +787,14 @@ int main(int argc, char **argv)
                 exit(EX_NOINPUT);
             }
         } else {
-            if (strlist_isempty(&listen_addrs))
-                strlist_add(&listen_addrs, ":");
+            if (strlist_isempty(&dopt.listen_addrs))
+                strlist_add(&dopt.listen_addrs, ":");
 
-            for (ls = listen_addrs.list; ls; ls = ls->next)
-                listen_to(listen_set, ls->str, ai_fam);
+            for (ls = dopt.listen_addrs.list; ls; ls = ls->next)
+                listen_to(listen_set, ls->str, xopt.ai_fam);
         }
 
-        strlist_free(&listen_addrs);
+        strlist_free(&dopt.listen_addrs);
 
         if (pollset_isempty(listen_set)) {
             tftpd_log(LOG_ERR, "no listen addresses available");
@@ -820,7 +804,7 @@ int main(int argc, char **argv)
         /* Daemonize this process */
         /* Note: when running in secure mode (-s), we must not chdir, since
            we are already in the proper directory. */
-        if (!nodaemon && daemon(secure, true) < 0) {
+        if (!dopt.nodaemon && daemon(dopt.secure, true) < 0) {
             tftpd_log(LOG_ERR, "cannot daemonize: %s", strerror(errno));
             exit(EX_OSERR);
         }
@@ -841,16 +825,16 @@ int main(int argc, char **argv)
 
     dup2(nullfd, 0);
     dup2(nullfd, 1);
-    if (!use_stderr)
+    if (!dopt.use_stderr)
         dup2(nullfd, 2);
 
-    if (pidfile) {
-        FILE *pf = fopen(pidfile, "w");
+    if (dopt.pidfile) {
+        FILE *pf = fopen(dopt.pidfile, "w");
         if (!pf) {
             tftpd_log(LOG_ERR,
                       "cannot open pid file '%s' for writing: %s",
-                      pidfile, strerror(errno));
-            pidfile = NULL;
+                      dopt.pidfile, strerror(errno));
+            dopt.pidfile = NULL;
         } else {
             bool err = fprintf(pf, "%d\n", getpid()) < 0;
             bool write_error = !!ferror(pf);
@@ -858,7 +842,7 @@ int main(int argc, char **argv)
             err = err || write_error || close_error;
             if (err)
                 tftpd_log(LOG_ERR, "error writing pid file '%s': %s",
-                          pidfile, strerror(errno));
+                          dopt.pidfile, strerror(errno));
         }
     }
 
@@ -878,21 +862,21 @@ int main(int argc, char **argv)
      * These signals are handled synchronously: the handler simply
      * sets a flag, and expect pollset_poll() to return EINTR.
      */
-    set_signal(SIGHUP,  standalone ? handle_reload : handle_exit, 0);
+    set_signal(SIGHUP,  dopt.standalone ? handle_reload : handle_exit, 0);
     set_signal(SIGTERM, handle_exit, 0);
     set_signal(SIGINT,  handle_exit, 0);
 
-    if (spec_umask || !unixperms)
-        umask(my_umask);
+    if (dopt.spec_umask || !dopt.unixperms)
+        umask(dopt.my_umask);
 
     while (1) {
         int what;
         int rv;
 
         if (exit_signal) {
-            if (pidfile && unlink(pidfile)) {
+            if (dopt.pidfile && unlink(dopt.pidfile)) {
                 tftpd_log(LOG_WARNING, "error removing pid file '%s': %s",
-                          pidfile, strerror(errno));
+                          dopt.pidfile, strerror(errno));
                 exit(EX_OSERR);
             } else {
                 exit(0);
@@ -901,13 +885,13 @@ int main(int argc, char **argv)
 
         if (reload_signal) {
             reload_signal = 0;
-            if (rewrite_file) {
+            if (dopt.rewrite_file) {
                 freerules(rewrite_rules);
-                rewrite_rules = read_remap_rules(rewrite_file);
+                rewrite_rules = read_remap_rules(dopt.rewrite_file);
             }
         }
 
-        rv = pollset_poll(listen_set, POLLSET_IN, waittime);
+        rv = pollset_poll(listen_set, POLLSET_IN, dopt.waittime);
         if (rv == -1 && errno == EINTR)
             continue;           /* Signal caught, reloop */
 
@@ -956,7 +940,7 @@ int main(int argc, char **argv)
         }
 #endif
 
-        if (standalone) {
+        if (dopt.standalone) {
             union sock_addr sa;
             socklen_t len = sizeof sa;
             if (((from.sa.sa_family == AF_INET) &&
@@ -1022,7 +1006,7 @@ int main(int argc, char **argv)
     /* Make sure the log socket is still connected.  This has to be
        done before the chroot, while /dev/log is still accessible,
        so depending on the automatic re-opening by syslog() is unsafe. */
-    if (secure)
+    if (dopt.secure)
         tftpd_reopenlog();
 
     /* Close file descriptors we don't need */
@@ -1053,11 +1037,11 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef HAVE_INITGROUPS
-    setrv = initgroups(user, pw->pw_gid);
+    setrv = initgroups(dopt.user, pw->pw_gid);
     if (!setrv) {
 	die = 0;
     } else if (errno != EPERM) {
-        tftpd_log(LOG_ERR, "cannot set groups for user %s", user);
+        tftpd_log(LOG_ERR, "cannot set groups for user %s", dopt.user);
 	die = EX_OSERR;
     }
 #endif
@@ -1065,7 +1049,7 @@ int main(int argc, char **argv)
 	exit(die);
 
     /* Chroot and drop privileges */
-    if (secure) {
+    if (dopt.secure) {
         if (chroot(".") || chdir("/")) {
             tftpd_log(LOG_ERR, "chroot: %s", strerror(errno));
             exit(EX_OSERR);
@@ -1102,7 +1086,8 @@ int main(int argc, char **argv)
     }
 
     /* Process the request... */
-    if (pick_port_bind(peer, &myaddr, portrange_from, portrange_to) < 0) {
+    if (pick_port_bind(peer, &myaddr, xopt.portrange_from,
+                       xopt.portrange_to) < 0) {
         tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
         exit(EX_IOERR);
     }
@@ -1198,7 +1183,7 @@ static int tftp(struct tftphdr *tp, int size)
                 nak(EACCESS, errmsgptr);        /* File denied by mapping rule */
                 exit(0);
             }
-            if (verbosity >= 1) {
+            if (dopt.verbosity >= 1) {
                 if (filename == origfilename
                     || !strcmp(filename, origfilename))
                     tftpd_log(LOG_NOTICE, "%s from %s filename %s",
@@ -1274,8 +1259,8 @@ static bool set_blksize(uintmax_t *vp)
 
     if (sz < 8)
         return false;
-    else if (sz > max_blksize)
-        sz = max_blksize;
+    else if (sz > xopt.max_blksize)
+        sz = xopt.max_blksize;
 
     *vp = segsize = sz;
     blksize_set = true;
@@ -1294,8 +1279,8 @@ static bool set_blksize2(uintmax_t *vp)
 
     if (sz < 8)
         return false;
-    else if (sz > max_blksize)
-        sz = max_blksize;
+    else if (sz > xopt.max_blksize)
+        sz = xopt.max_blksize;
     else
 
     /* Convert to a power of two */
@@ -1358,10 +1343,11 @@ static void negotiate_windowsize(char **ap)
         return;
 
     window = requested_windowsize;
-    if (window > max_windowsize)
-        window = max_windowsize;
-    if (max_windowbytes && window > max_windowbytes / (uintmax_t)segsize)
-        window = max_windowbytes / (uintmax_t)segsize;
+    if (window > xopt.max_windowsize)
+        window = xopt.max_windowsize;
+    if (dopt.max_windowbytes &&
+        window > dopt.max_windowbytes / (uintmax_t)segsize)
+        window = dopt.max_windowbytes / (uintmax_t)segsize;
 
     if (window < 2)
         return;
@@ -1468,7 +1454,7 @@ static bool set_utimeout(uintmax_t *vp)
  */
 static void do_opt(const char *opt, const char *val, char **ap)
 {
-    struct options *po;
+    struct daemon_protocol_option *po;
     char retbuf[OPTBUFSIZE];
     char *p = *ap;
     size_t optlen, retlen;
@@ -1478,7 +1464,7 @@ static void do_opt(const char *opt, const char *val, char **ap)
     /* Global option-parsing variables initialization */
     blksize_set = false;
 
-    if (reject_all_options)
+    if (dopt.reject_all_options)
         return;
 
     if (!*opt || !*val)
@@ -1489,9 +1475,9 @@ static void do_opt(const char *opt, const char *val, char **ap)
     if (*vend || errno == ERANGE)
 	return;
 
-    for (po = options; po->o_opt; po++)
-        if (!strcasecmp(po->o_opt, opt)) {
-            if (po->o_fnc(&v)) {
+    for (po = protocol_options; po->name; po++)
+        if (!strcasecmp(po->name, opt)) {
+            if (po->handler(&v)) {
                 if (!strcasecmp(opt, "windowsize"))
                     break;
 
@@ -1603,8 +1589,8 @@ static void rewrite_test(FILE *tf)
 #endif
     static const char phony_ip4_addr[4] = { 192, 0, 2, 34 };
     char *line = xmalloc(MAX_SEGSIZE + 1);
-    int mode = cancreate ? WRQ : RRQ;
-    sa_family_t af = ai_fam;
+    int mode = dopt.cancreate ? WRQ : RRQ;
+    sa_family_t af = xopt.ai_fam;
 
     memset(&from, 0, sizeof from);
 
@@ -1657,7 +1643,7 @@ static const char *rewrite_access(const struct formats *pf,
 {
     char *newfn = NULL;
     if (filename[0] != '/') {
-        if (rooted) {
+        if (dopt.rooted) {
             size_t len = strlen(filename);
             newfn = xmalloc(len+2);
             memcpy(newfn+1, filename, len+1);
@@ -1712,7 +1698,7 @@ static int validate_access(const char *filename, int mode,
     tsize_ok = false;
     *errmsg = NULL;
 
-    if (!secure) {
+    if (!dopt.secure) {
         const char **pathlist = parse_path(filename, true);
 
         if (!pathlist) {
@@ -1720,7 +1706,7 @@ static int validate_access(const char *filename, int mode,
             return (EACCESS);
         }
 
-        for (dirp = dirs; *dirp; dirp++) {
+        for (dirp = dopt.dirs; *dirp; dirp++) {
             if (compare_paths(pathlist, *dirp) & 2)
                 break;
         }
@@ -1729,7 +1715,7 @@ static int validate_access(const char *filename, int mode,
             return (EACCESS);
         }
 
-        filename = fnbuf = build_path(path_prefix, pathlist);
+        filename = fnbuf = build_path(dopt.path_prefix, pathlist);
         free(pathlist);
     }
 
@@ -1737,7 +1723,8 @@ static int validate_access(const char *filename, int mode,
      * We use different a different permissions scheme if `cancreate' is
      * set.
      */
-    wmode = O_WRONLY | (cancreate ? O_CREAT : 0) | (pf->f_convert ? O_TEXT : O_BINARY);
+    wmode = O_WRONLY | (dopt.cancreate ? O_CREAT : 0) |
+        (pf->f_convert ? O_TEXT : O_BINARY);
     rmode = O_RDONLY | (pf->f_convert ? O_TEXT : O_BINARY);
 
 #ifndef HAVE_FTRUNCATE
@@ -1762,7 +1749,7 @@ static int validate_access(const char *filename, int mode,
 	exit(0);                /* Assume a transfer is already underway */
 
     if (mode == RRQ) {
-        if (!unixperms && (stbuf.st_mode & (S_IREAD >> 6)) == 0) {
+        if (!dopt.unixperms && (stbuf.st_mode & (S_IREAD >> 6)) == 0) {
             close(fd);
             *errmsg = "File must have global read permissions";
             return (EACCESS);
@@ -1771,7 +1758,7 @@ static int validate_access(const char *filename, int mode,
         /* We don't know the tsize if conversion is needed */
         tsize_ok = !pf->f_convert;
     } else {
-        if (!unixperms) {
+        if (!dopt.unixperms) {
             if ((stbuf.st_mode & (S_IWRITE >> 6)) == 0) {
                 close(fd);
                 *errmsg = "File must have global write permissions";
@@ -2040,7 +2027,7 @@ static void nak(int error, const char *msg)
     memcpy(tp->th_msg, msg, length);
     length += 4;                /* Add space for header */
 
-    if (verbosity >= 2) {
+    if (dopt.verbosity >= 2) {
         tftpd_log(LOG_INFO, "%s: sending NAK (%d, %s)",
                   from_str, error, tp->th_msg);
     }
