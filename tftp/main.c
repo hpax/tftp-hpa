@@ -90,6 +90,9 @@ static int ai_fam_sock = AF_UNSPEC;
 static int ai_fam_sock = AF_INET;
 #endif
 
+static void help_init(void);
+static int print_cmd_help(const char *);
+
 static int get(int, char **);
 static int help(int, char **);
 static int modecmd(int, char **);
@@ -118,79 +121,165 @@ static bool parse_uint_range(const char *, unsigned int, unsigned int,
 static void putusage(const char *);
 static void settftpmode(const struct modes *);
 
-#define HELPINDENT (sizeof("connect"))
-
 struct cmd {
     const char *name;
-    const char *help;
     int (*handler) (int, char **);
+    const char *shorthelp;
+    const char *longhelp;
 };
 
 static const struct cmd cmdtab[] = {
-    {"connect",
-     "connect to remote tftp",
-     setpeer},
-    {"mode",
-     "set file transfer mode",
-     modecmd},
-    {"put",
-     "send file",
-     put},
-    {"get",
-     "receive file",
-     get},
-    {"quit",
-     "exit tftp",
-     quit},
-    {"verbose",
-     "toggle verbose mode",
-     setverbose},
-    {"trace",
-     "toggle packet tracing",
-     settrace},
-    {"literal",
-     "toggle literal mode, ignore ':' in file name",
-     setliteral},
-    {"status",
-     "show current status",
-     status},
-    {"binary",
-     "set mode to octet",
-     setbinary},
-    {"ascii",
-     "set mode to netascii",
-     setascii},
-    {"blocksize",
-     "set the requested transfer block size",
-     setblocksize},
-    {"rexmt",
-     "set per-packet transmission timeout",
-     setrexmt},
-    {"timeout",
-     "set total retransmission timeout",
-     settimeout},
-    {"windowsize",
-     "set the requested transfer window size",
-     setwindowsize},
-    {"?",
-     "print help information",
-     help},
-    {"help",
-     "print help information",
-     help},
-    {0, 0, 0}
+    {
+        "c[onnect]", setpeer,
+        "connect to remote tftp server",
+        "  connect host [port]\n"
+        "    Set the host, and optionally port, for transfers. TFTP does not\n"
+        "    maintain connections between transfers, so this command merely\n"
+        "    remembers the host to use. A remote host can instead be specified\n"
+        "    as part of an [m]get or [m]put command.\n"
+    },
+    {
+        "m[ode]", modecmd,
+        "set file transfer mode",
+        "  mode {netascii|octet}\n"
+        "    Specify the transfer mode. netascii converts line endings and\n"
+        "    octet transfers binary data without conversion. The default is\n"
+        "    netascii.\n"
+    },
+    {
+        "p[ut]", put,
+        "send (upload) file or files",
+        "  put [local-file] [host:]remote-file\n"
+        "    Upload a file to a remote file or directory. If 'local-file'\n"
+        "    is not specified, it is assumed to be the same as 'remote-file'\n"
+        "    with any directory portion removed. If 'remote-file' is\n"
+        "    to be considered a directory, it needs to end in '/'.\n"
+        "  put local-file local-file... [host:]remote-directory\n"
+        "    Upload two or more files to a directory on the remote host.\n"
+        "    See also the 'mput' command.\n"
+        "\n"
+        "  The remote host is assumed to use '/' as its directory separator.\n"
+        "  The remote name may be of the form host:filename to specify\n"
+        "  the remote host to connect to, as if the 'connect' command had\n"
+        "  been used to specify this host.\n"
+        "  Enable literal mode to prevent special treatment of ':' in filenames.\n"
+    },
+    {
+        "g[et]", get,
+        "receive (download) file or files",
+        "  get [host:]remote-file [local-file]\n"
+        "    Download a file from a remote file or directory. If 'local-file'\n"
+        "    is not specified, it is assumed to be the same as 'remote-file'\n"
+        "    with any directory portion removed.\n"
+        "  get [host:]remote-file [host:]remote-file [host:]remote-file...\n"
+        "    Download three or more files into the current directory on the\n"
+        "   local system. See also the 'mget' command.\n"
+        "\n"
+        "  The remote host is assumed to use '/' as its directory separator.\n"
+        "  The remote name may be of the form host:filename to specify\n"
+        "  the remote host to connect to, as if the 'connect' command had\n"
+        "  been used to specify this host.\n"
+        "  Enable literal mode to prevent special treatment of ':' in filenames.\n"
+    },
+    {
+        "q[uit]", quit,
+        "exit tftp",
+        "  quit\n"
+        "    Exit tftp. End-of-file also exits.\n"
+    },
+    {
+        "v[erbose]", setverbose,
+        "toggle or set message verbosity",
+        "  verbose [level]\n"
+        "    Toggle verbose mode or set the verbosity level.\n"
+    },
+    {
+        "tr[ace]", settrace,
+        "toggle packet tracing",
+        "  trace\n"
+        "    Toggle packet tracing, a debugging feature.\n"
+    },
+    {
+        "l[iteral]", setliteral,
+        "toggle literal mode, ignore ':' in file name",
+        "  literal\n"
+        "    Toggle literal mode. When enabled, this mode prevents special\n"
+        "    treatment of ':' in filenames.\n"
+    },
+    {
+        "st[atus]", status,
+        "show current status",
+        "  status\n"
+        "    Show current status.\n"
+    },
+    {
+        "b[inary]", setbinary,
+        "set mode to octet",
+        "  binary\n"
+        "    Set the transfer mode to octet (shorthand for \"mode octet\".)\n"
+    },
+    {
+        "a[scii]", setascii,
+        "set mode to netascii",
+        "  ascii\n"
+        "    Set the transfer mode to netascii (shorthand for \"mode netascii\".)\n"
+    },
+    {
+        "bl[ocksize]", setblocksize,
+        "set the requested transfer block size",
+        "  blocksize size\n"
+        "    Request the RFC 2348 blksize option with 'size' bytes per data\n"
+        "    block. Valid values are 8 through 65464.\n"
+    },
+    {
+        "r[exmt]", setrexmt,
+        "set per-packet transmission timeout",
+        "  rexmt packet-timeout\n"
+        "    Set the initial per-packet retransmission timeout in seconds. Each\n"
+        "    subsequent retry doubles this interval.\n"
+    },
+    {
+        "ti[meout]", settimeout,
+        "set total retransmission timeout",
+        "  timeout total-timeout\n"
+        "    Set the maximum retransmission interval in seconds.\n"
+    },
+    {
+        "win[dowsize]", setwindowsize,
+        "set the requested transfer window size",
+        "  windowsize size\n"
+        "    Request the RFC 7440 windowsize option with 'size' data\n"
+        "    blocks per window. Valid values are 1 through 32768.\n"
+    },
+    {
+        "?", help,
+        "print help information",
+        "  help [command ...]\n"
+        "  ? [command ...]\n"
+        "    Print help information. With command names, display detailed help\n"
+        "    for each command.\n"
+    },
+    {
+        "h[elp]", help,
+        "print help information",
+        "  help [command ...]\n"
+        "  ? [command ...]\n"
+        "    Print help information. With command names, display detailed help\n"
+        "    for each command.\n"
+    }
 };
 
-static const struct cmd *getcmd(const char *, const char **errtype);
+static const char *getcmd(const char *, const struct cmd **cmdp);
 static char *tail(char *);
 
-static noreturn void usage(int errcode)
+static void usage(int errcode)
 {
     fprintf(errcode ? stderr : stdout,
             "Usage: %s [options] [host [port]] [-c command...]\n"
             "  Options:\n"
             "    -V, --version              print version number and exit\n"
             "    -h, --help                 print this help text and exit\n"
+            "        --help=command         print the help text for \"command\" and exit\n"
 #ifdef HAVE_IPV6
             "    -4. --ipv4                 only use IPv4, no IPv6\n"
             "    -6. --ipv6                 only use IPv6, no IPv4\n"
@@ -244,7 +333,7 @@ static const struct option long_options[] = {
     { "netascii",   no_argument,       NULL, 'a' },
     { "binary",     no_argument,       NULL, 'b' },
     { "octet",      no_argument,       NULL, 'b' },
-    { "help",       no_argument,       NULL, 'h' },
+    { "help",       optional_argument, NULL, 'h' },
     { NULL,         0,                 NULL, 0 }
 };
 
@@ -260,6 +349,7 @@ int main(int argc, char *argv[])
 
     set_progname(argv[0]);
     random_init();
+    help_init();
 
     copt.mode = MODE_DEFAULT;
 
@@ -358,10 +448,14 @@ int main(int argc, char *argv[])
             }
             break;
         case 'h':
-            usage(0);
+            if (optarg && *optarg)
+                exit(print_cmd_help(optarg));
+            else
+                usage(0);
             break;
         default:
             usage(EX_USAGE);
+            break;
         }
     }
 
@@ -429,10 +523,10 @@ int main(int argc, char *argv[])
             exit(EX_USAGE);
         }
 
-        c = getcmd(pargv[0], &errtype);
-        if (!c) {
-            fprintf(stderr, "%s: %s command: %s\n",
-                    _progname, errtype, pargv[0]);
+        errtype = getcmd(pargv[0], &c);
+        if (errtype) {
+            fprintf(stderr, "%s: %s command: %s (did you mean %s?)\n",
+                    _progname, errtype, pargv[0], c->name);
             exit(EX_USAGE);
         }
 
@@ -651,6 +745,15 @@ static int set_transfer_host(char *host, const char *port_name)
 }
 
 /*
+ * Is this a directory (ending in /)?
+ */
+static bool is_directory(const char *filename)
+{
+    const char *ep = strchr(filename, 0);
+    return ep > filename && ep[-1] == '/';
+}
+
+/*
  * Send file(s).
  */
 static int put(int argc, char *argv[])
@@ -672,6 +775,7 @@ static int put(int argc, char *argv[])
         return EX_USAGE;
     }
     targ = argv[argc - 1];
+
     if (!copt.literal && strchr(argv[argc - 1], ':')) {
         for (n = 1; n < argc - 1; n++)
             if (strchr(argv[n], ':')) {
@@ -693,7 +797,7 @@ static int put(int argc, char *argv[])
         printf("No target machine specified.\n");
         return EX_USAGE;
     }
-    if (argc < 4) {
+    if (argc < 3 || (argc == 3 && !is_directory(targ))) {
         cp = argc == 2 ? tail(targ) : argv[1];
         fd = open(cp, O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
@@ -790,7 +894,7 @@ static int get(int argc, char *argv[])
                 continue;
             }
         }
-        if (argc < 4) {
+        if (argc < 3 || (argc == 3 && !is_directory(argv[2]))) {
             cp = argc == 3 ? argv[2] : tail(src);
             fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                       0666);
@@ -1018,47 +1122,71 @@ static void command(void)
         if (margc == 0)
             continue;
 
-        c = getcmd(margv[0], &errtype);
-        if (!c) {
-            printf("Error: %s command: %s\n", errtype, margv[0]);
+        errtype = getcmd(margv[0], &c);
+        if (errtype) {
+            printf("Error: %s command: %s (did you mean %s?)\n",
+                   errtype, margv[0], c->name);
             continue;
         }
         (void)(*c->handler) (margc, margv);
     }
 }
 
-static const struct cmd *getcmd(const char *name, const char **errtype)
+static const char *getcmd(const char *name, const struct cmd **cmdp)
 {
     const char *p, *q;
-    const struct cmd *c, *found;
-    int nmatches, longest;
+    const struct cmd *cmd;
+    const struct cmd *best = &cmdtab[0];
+    int best_metric = -1;
 
-    *errtype = NULL;
-    longest = 0;
-    nmatches = 0;
-    found = 0;
-    for (c = cmdtab; (p = c->name) != NULL; c++) {
-        for (q = name; *q == *p++; q++)
-            if (*q == 0)        /* exact match? */
-                return (c);
-        if (!*q) {              /* the name was a prefix */
-            if (q - name > longest) {
-                longest = q - name;
-                nmatches = 1;
-                found = c;
-            } else if (q - name == longest)
-                nmatches++;
+    for (cmd = cmdtab; cmd < ARRAY_END(cmdtab); cmd++) {
+        bool ok    = false;
+        bool stop  = false;
+        int metric = 0;
+        for (p = name, q = cmd->name; !stop; q++) {
+            unsigned char pc = *p;
+            unsigned char qc = *q;
+            switch (qc) {
+            case '\0':
+            case ']':
+                /* Exact match if end of input, otherwise fail */
+                ok = !pc;
+                stop = true;
+                break;
+
+            case '[':
+                ok = true;      /* Valid prefix, so far at least */
+                /* Do not advance p here */
+                break;
+
+            default:
+                if (!pc) {
+                    /* ok if and only if it is a valid prefix */
+                    stop = true;
+                } else if (tolower(pc) != qc) {
+                    /* Character mismatch */
+                    ok   = false;
+                    stop = true;
+                } else {
+                    metric++;
+                    p++;
+                }
+                break;
+            }
+        }
+
+        if (ok) {
+            *cmdp = cmd;
+            return NULL;
+        } else if (metric > best_metric) {
+            best = cmd;
+            best_metric = metric;
         }
     }
-    if (nmatches > 1) {
-        *errtype = "ambiguous";
-        return NULL;
-    } else if (!nmatches) {
-        *errtype = "invalid";
-        return NULL;
-    }
 
-    return (found);
+    /* Failure, but suggest the best match */
+    *cmdp = best;
+    return "unknown";
 }
 
 /*
@@ -1106,29 +1234,59 @@ static int quit(int argc, char *argv[])
 /*
  * Help command.
  */
-static int help(int argc, char *argv[])
+static int helpindent = 0;
+
+static void help_init(void)
 {
     const struct cmd *c;
 
-    printf("%s\n", VERSION);
+    for (c = cmdtab; c < ARRAY_END(cmdtab); c++) {
+        int len = strlen(c->name);
+        if (len > helpindent)
+            helpindent = len;
+    }
+}
 
-    if (argc == 1) {
-        printf("Commands may be abbreviated.  Commands are:\n\n");
-        for (c = cmdtab; c->name; c++)
-            printf("%-*s\t%s\n", (int)HELPINDENT, c->name, c->help);
+static int print_cmd_help(const char *cmd)
+{
+    const struct cmd *c;
+    const char *errtype;
+
+    errtype = getcmd(cmd, &c);
+    if (errtype) {
+        printf("help: %s command %s (did you mean %s?)\n",
+               errtype, cmd, c->name);
+        return EX_USAGE;
+    } else {
+        printf("%-*s  %s\n%s",
+               helpindent, c->name, c->shorthelp, c->longhelp);
         return 0;
     }
-    while (--argc > 0) {
-        const char *errtype;
-        char *arg;
-        arg = *++argv;
-        c = getcmd(arg, &errtype);
-        if (!c)
-            printf("help: %s command %s\n", errtype, arg);
-        else
-            printf("%s\n", c->help);
+}
+
+static int help(int argc, char *argv[])
+{
+    int err = 0;
+
+    if (argc == 1) {
+        const struct cmd *c;
+
+        printf("%s command list\n"
+               "Commands may be abbreviated as indicated by [...]\n",
+               VERSION);
+        for (c = cmdtab; c < ARRAY_END(cmdtab); c++)
+            printf("  %-*s  %s\n", helpindent, c->name, c->shorthelp);
+    } else {
+        int i;
+
+        for (i = 1; i < argc; i++) {
+            if (i > 1)
+                putchar('\n');      /* Blank line between help texts */
+            err |= print_cmd_help(argv[i]);
+        }
     }
-    return 0;
+
+    return err;
 }
 
 static int settrace(int argc, char *argv[])
