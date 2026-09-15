@@ -103,12 +103,12 @@ struct common_options xopt = {
 
 #ifdef WITH_REGEX
 static struct rule *rewrite_rules = NULL;
-static void rewrite_test(FILE *);
 static size_t rewrite_macros(char macro, const char **output);
 #else
 #define rewrite_rules NULL
 #define rewrite_macros NULL
 #endif
+static void rewrite_test(FILE *);
 
 #if WITH_JAIL
 static int jail_root = -1;
@@ -697,7 +697,7 @@ int main(int argc, char **argv)
             }
             dopt.rewrite_file = optarg;
 #else
-            tftp_log(LOG_ERR, "--map-file not supported by this build");
+            tftpd_log(LOG_ERR, "--map-file not supported by this build");
             exit(EX_USAGE);
 #endif
             break;
@@ -992,10 +992,12 @@ int main(int argc, char **argv)
 
         if (reload_signal) {
             reload_signal = 0;
+#ifdef WITH_REGEX
             if (dopt.rewrite_file) {
                 freerules(rewrite_rules);
                 rewrite_rules = read_remap_rules(dopt.rewrite_file);
             }
+#endif
         }
 
         rv = pollset_poll(listen_set, POLLSET_IN, dopt.waittime);

@@ -10,7 +10,7 @@ VERSION = $(shell cat ../version)
 include ../MRULES
 
 OBJS  = tftpd.$(O) recvfrom.$(O) misc.$(O) path.$(O) listen.$(O) \
-	strlist.$(O) $(TFTPDOBJS)
+	strlist.$(O) remap.$(O)
 
 all: tftpd$(X) tftpd.8
 
