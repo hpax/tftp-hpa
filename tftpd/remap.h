@@ -17,8 +17,7 @@
 
 /* Opaque type */
 struct rule;
-
-#ifdef WITH_REGEX
+struct formats;
 
 /*
  * This is called by the remap engine when it encounters macros such
@@ -31,17 +30,15 @@ struct rule;
  */
 typedef size_t (*match_pattern_callback) (char, const char **);
 
+/* Execute a rule set on a string; returns a malloc'd new string. */
+char *rewrite_string(const struct formats *, const char *,
+		     const struct rule *, int, int,
+                     match_pattern_callback, const char **);
+
 /* Read a rule file */
 struct rule *parserulefile(FILE *);
 
 /* Destroy a rule file data structure */
 void freerules(struct rule *);
 
-/* Execute a rule set on a string; returns a malloc'd new string. */
-struct formats;
-char *rewrite_string(const struct formats *, const char *,
-		     const struct rule *, int, int,
-                     match_pattern_callback, const char **);
-
-#endif                          /* WITH_REGEX */
-#endif                          /* TFTPD_REMAP_H */
+#endif

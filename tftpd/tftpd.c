@@ -96,7 +96,13 @@ struct common_options xopt = {
 #ifdef WITH_REGEX
 static struct rule *rewrite_rules = NULL;
 static void rewrite_test(FILE *);
+static size_t rewrite_macros(char macro, const char **output);
+#else
+#define rewrite_rules NULL
+#define rewrite_macros NULL
 #endif
+
+static char *normalize_path(char *name);
 
 static FILE *file;
 
@@ -362,6 +368,53 @@ static long getenv_ulong(const char *var)
     return n;
 }
 
+static enum normalizations parse_normalize(const char *str)
+{
+    if (!str)
+        return NORM_PATH;
+
+    switch (*str) {
+    case '\0':
+        return NORM_PATH;
+
+    case 'a':
+        if (!strcmp(str, "all"))
+            return NORM_PATH;
+        break;
+
+    case 'p':
+        if (!strcmp(str, "path"))
+            return NORM_PATH;
+        break;
+
+    case 'n':
+        if (!strcmp(str, "no") || !strcmp(str, "none"))
+            return NORM_NONE;
+        break;
+
+    case 'y':
+        if (!strcmp(str, "yes"))
+            return NORM_PATH;
+        break;
+
+    case 'r':
+        if (!strcmp(str, "root"))
+            return NORM_ROOT;
+        break;
+
+    case '/':
+        if (!str[1])
+            return NORM_ROOT;
+        break;
+
+    default:
+        break;
+    }
+
+    tftpd_log(LOG_ERR, "invalid --normalize option: %s\n", str);
+    exit(EX_USAGE);
+}
+
 enum long_only_options {
     OPT_VERBOSITY	= 256,
     OPT_STDERR,
@@ -370,7 +423,8 @@ enum long_only_options {
     OPT_SYSTEMD,
     OPT_WINDOW_BYTES,
     OPT_REJECT_ALL,
-    OPT_PATH_PREFIX
+    OPT_PATH_PREFIX,
+    OPT_NORMALIZE
 };
 
 static const struct option long_options[] = {
@@ -399,7 +453,6 @@ static const struct option long_options[] = {
     { "retransmit",  1, NULL, 'T' },
     { "port-range",  1, NULL, 'R' },
     { "ports",       1, NULL, 'R' },
-    { "rooted",      0, NULL, '/' },
     { "service",     1, NULL, 'S' },
     { "path-prefix", 1, NULL, OPT_PATH_PREFIX },
     { "port",        1, NULL, 'S' },
@@ -409,9 +462,10 @@ static const struct option long_options[] = {
     { "stderr",      0, NULL, OPT_STDERR },
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { "systemd",     0, NULL, OPT_SYSTEMD },
+    { "normalize",   2, NULL, OPT_NORMALIZE },
     { NULL, 0, NULL, 0 }
 };
-static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:/S:m:P:";
+static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
 
 static struct pollset *listen_set;
 
@@ -588,9 +642,6 @@ int main(int argc, char **argv)
                 exit(EX_USAGE);
             }
             break;
-        case '/':
-            dopt.rooted = true;
-            break;
         case 'u':
             dopt.user = optarg;
             break;
@@ -664,6 +715,9 @@ int main(int argc, char **argv)
             break;
         case 'P':
             dopt.pidfile = optarg;
+            break;
+        case OPT_NORMALIZE:
+            dopt.normalize = parse_normalize(optarg);
             break;
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
@@ -1497,6 +1551,61 @@ static void do_opt(const char *opt, const char *val, char **ap)
     *ap = p;
 }
 
+/*
+ * Normalize a filename string according to the dopt.normalize
+ * setting. This string MUST have been allocated in heap storage, and
+ * may be changed.
+ */
+static char *normalize_path(char *fn)
+{
+    if (!fn)
+        return fn;
+
+    if (dopt.normalize >= NORM_ROOT) {
+        /* Add a leading slash if missing */
+        if (fn[0] != '/') {
+            size_t len = strlen(fn);
+            fn = xrealloc(fn, len+2);
+            memmove(fn+1, fn, len+1);
+            fn[0] = '/';
+        }
+    }
+
+    if (dopt.normalize >= NORM_PATH) {
+        /* Handle // /./ /../ -- the first character is already / */
+        const char *p = fn;
+        char *q = fn;
+        char c;
+
+        while ((c = *p++)) {
+            *q++ = c;
+            while (c == '/') {
+                while ((c = *p) && c == '/')
+                    p++;
+
+                if (c == '.') {
+                    if (!p[1] || p[1] == '/') {
+                        /* Skip . path component */
+                        p += 1;
+                    } else if (p[1] == '.' && (!p[2] || p[2] == '/')) {
+                        /* .. path component; drop one level if there is one */
+                        if (q > fn+1) {
+                            q--;        /* Drop immediately previous slash */
+                            while (q > fn && q[-1] != '/')
+                                q--;
+                        }
+                        p += 2;
+                    }
+                    c = *p;
+                }
+            }
+        }
+        *q = '\0';
+    }
+
+    return fn;
+}
+
 #ifdef WITH_REGEX
 
 /*
@@ -1617,11 +1726,11 @@ static void rewrite_test(FILE *tf)
         *nl = '\0';
         out = rewrite_string(&test_dummy_format, line, rewrite_rules,
                              mode, af, rewrite_macros, &msg);
+        out = normalize_path(out);
 
         if (out) {
             printf("%s\n", out);
-            if (out != line)
-                xfree(out);
+            xfree(out);
         } else {
             printf("ERROR: %s\n", msg);
         }
@@ -1629,7 +1738,6 @@ static void rewrite_test(FILE *tf)
     xfree(line);
 }
 
-#else
 #endif
 
 /*
@@ -1640,32 +1748,13 @@ static const char *rewrite_access(const struct formats *pf,
                                   const char *filename,
                                   int mode, int af, const char **msg)
 {
-    char *newfn = NULL;
-    if (filename[0] != '/') {
-        if (dopt.rooted) {
-            size_t len = strlen(filename);
-            newfn = xmalloc(len+2);
-            memcpy(newfn+1, filename, len+1);
-            newfn[0] = '/';
-            filename = newfn;
-        }
-    }
+    char *fn;
 
-#ifdef WITH_REGEX
-    if (rewrite_rules) {
-        filename = rewrite_string(pf, filename, rewrite_rules, mode, af,
-                                  rewrite_macros, msg);
-        xfree(newfn);
-    }
-#else
-    /* Avoid warnings */
-    (void)pf;
-    (void)mode;
-    (void)msg;
-    (void)af;
-#endif
+    fn = rewrite_string(pf, filename, rewrite_rules, mode,
+                        af, rewrite_macros, msg);
+    fn = normalize_path(fn);
 
-    return filename;
+    return fn;
 }
 
 /*

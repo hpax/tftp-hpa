@@ -17,6 +17,8 @@
 #include "options.h"
 #include "remap.h"
 
+#ifdef WITH_REGEX
+
 #include <ctype.h>
 #include <regex.h>
 
@@ -597,6 +599,9 @@ char *rewrite_string(const struct formats *pf,
     int deadman = dopt.map_steps;
     unsigned int bad_flags;
 
+    if (!rules)
+        return current;
+
     /* Default error */
     *errmsg = "Remap table failure";
 
@@ -798,3 +803,32 @@ quit:
     xfree(current);
     return NULL;        /* Did not terminate! */
 }
+
+#else /* WITH_REGEX */
+
+struct rule *parserulefile(FILE *f)
+{
+    return NULL;
+}
+
+void freerules(struct rule *r)
+{
+    (void)r;
+}
+
+char *rewrite_string(const struct formats *pf,
+                     const char *input, const struct rule *rules,
+                     int mode, int af, match_pattern_callback macrosub,
+                     const char **errmsg)
+{
+    (void)pf;
+    (void)rules;
+    (void)mode;
+    (void)af;
+    (void)macrosub;
+    (void)errmsg;
+
+    return xstrdup(input);
+}
+
+#endif

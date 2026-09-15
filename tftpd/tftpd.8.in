@@ -166,13 +166,14 @@ Using
 .B \-\-secure
 requires
 .B tftpd
-
 to be started out as root, and run as root for a considerable amount
 of time. Consider very carefully if this is genuinely desirable as
-oppposed to running the daemon as an unprivileged user and using a
-remap rules file and/or the
+oppposed to running the daemon as an unprivileged user and using the
+.BR \-\-map-file ,
+.BR \-\-normalize ,
+and/or
 .B \-\-path-prefix
-option instead.
+options instead.
 .TP
 \fB\-\-path-prefix\fP \fIprefix\fP
 Prepends \fIprefix\fP to the local filesystem path
@@ -278,19 +279,54 @@ options to simulate an IPv4 or IPv6 client. If
 .B \-\-create
 is included on the command line, simulate a PUT (WRQ) request,
 otherwise simulate a GET (RRQ) request.
+.IP
+If the
+.B \-\-normalize
+option is used, the output will also be normalized.
 .TP
-\fB\-/\fP, \fB\-\-rooted\fP
-If the filename requested by the client does not begin with
-.RB \\[lq] / \\[rq],
-automatically prepend a slash. This happens
-.I before
-filename remapping and path validation.
+\fB\-\-normalize\fP[=\fImode\fP]
+Normalize the path name. If remapping is used, normalization is
+applied after remapping.
+.I mode
+can be
+.BR none ,
+.BR root ,
+or
+.BR path .
+.IP
+If
+.I mode
+is
+.BR none ,
+no normalization is done. This is the default.
+.IP
+If
+.I mode
+is
+.BR root ,
+then a leading slash is prepended if there is none.
+.IP
+If
+.I mode
+is
+.BR path ,
+then a leading slash is prepended if there is none, duplicate slashes
+and
+.RB \\[lq] . \\[rq]
+pathname components are removed, and
+.RB \\[lq] .. \\[rq]
+pathname components are removed together with the previous pathname
+component, if one exists. This is the default if
+.I mode
+is not specified. Note that the actual file system contents are not
+examined; thus, symbolic links or missing directories are not taken
+into account.
 .IP
 This option can be used with
 .B \-\-path-prefix
 to obtain an effect similar to
 .B \-\-secure
-without needing a full remap file.
+without needing a full remap file. See "FILENAME PROCESSING" below.
 .TP
 \fB\-v\fP, \fB\-\-verbose\fP
 Increase the logging verbosity of
@@ -443,6 +479,31 @@ The
 option disables
 .I all
 TFTP options, and thus the server will never return an OACK packet.
+
+.SH "FILENAME PROCESSING"
+The filename requested by the server goes through the following steps,
+in this order:
+.PP
+.IP "1." 4n
+If the
+.B \-\-map-file
+option is used, filename remapping. See "FILENAME REMAPPING" below.
+.IP "2." 4n
+If the
+.B \-\-normalize
+option is used, filename normalization. See the
+.B \-\-normalize
+option above.
+.IP "3." 4n
+If the
+.B \-\-secure
+option is
+.I not
+used, path validation. See "PATH VALIDATION" below.
+.IP "4." 4n
+If the
+.B \-\-path-prefix
+option is used, the path prefix is prepended.
 
 .SH "FILENAME REMAPPING"
 The
@@ -614,49 +675,6 @@ to any outstanding
 .B tftpd
 process.
 
-.SH "SECURITY"
-The use of TFTP services does not require an account or password on
-the server system.  Due to the lack of authentication information,
-.B tftpd
-will allow only publicly readable files (o+r) to be accessed, unless the
-.B \-\-permissive
-option is specified.  Files may be written only if they already exist
-and are publicly writable, unless the
-.B \-\-create
-option is specified.  Note that this extends the concept of ``public''
-to include all users on all hosts that can be reached through the
-network; this may not be appropriate on all systems, and its
-implications should be considered before enabling TFTP service.
-.PP
-It is strongly recommended to use some kind of firewall or
-packet-filter solution to restrict access to the TFTP port. TFTP only
-uses the TFTP port itself for the initial (request) packet, and so the
-cost of such a filter is neglible.
-.PP
-The server should be set to run as the user with the lowest possible
-privilege; please see the
-.B \-\-user
-flag.  It is strongly recommended to set up a specific user account for
-.BR tftpd ,
-rather than letting it run as "nobody", to guard against privilege
-leaks between applications.
-.PP
-Access to files is restricted by the list of directories passed to
-.B tftpd
-on the command line. Alternatively, the
-.B \-\-secure
-flag is used to set up a
-.MR chroot 2
-environment for the server to run in once a connection has been set up.
-.PP
-The filename mapping facility
-.RB ( \-\-map-file
-flag) support can be used to provide fine-grained control of
-permissions as well handle nonstandard path names requested by
-clients, such as Windows clients expecting to be able to use
-.B \(rs
-as path separators.
-
 .SH "PATH VALIDATION"
 If the
 .B \-\-secure
@@ -707,6 +725,52 @@ is used, no path validation is performed by
 .B tftpd
 itself.
 
+.SH "SECURITY"
+The use of TFTP services does not require an account or password on
+the server system.  Due to the lack of authentication information,
+.B tftpd
+will allow only publicly readable files (o+r) to be accessed, unless the
+.B \-\-permissive
+option is specified.  Files may be written only if they already exist
+and are publicly writable, unless the
+.B \-\-create
+option is specified.  Note that this extends the concept of ``public''
+to include all users on all hosts that can be reached through the
+network; this may not be appropriate on all systems, and its
+implications should be considered before enabling TFTP service.
+.PP
+It is strongly recommended to use some kind of firewall or
+packet-filter solution to restrict access to the TFTP port. TFTP only
+uses the TFTP port itself for the initial (request) packet, and so the
+cost of such a filter is neglible.
+.PP
+The server should be set to run as the user with the lowest possible
+privilege; please see the
+.B \-\-user
+flag.  It is strongly recommended to set up a specific user account for
+.BR tftpd ,
+rather than letting it run as "nobody", to guard against privilege
+leaks between applications.
+.PP
+Access to files is restricted by the list of directories passed to
+.B tftpd
+on the command line. Alternatively, the
+.B \-\-secure
+flag is used to set up a
+.MR chroot 2
+environment for the server to run in once a connection has been set up.
+.PP
+The filename mapping facility
+.RB ( \-\-map-file
+flag) support can be used to provide fine-grained control of
+permissions as well handle nonstandard path names requested by
+clients, such as Windows clients expecting to be able to use
+.B \(rs
+as path separators.
+.PP
+Make sure to examine the "FILENAME PROCESSING" flow to ensure than the
+path names actually processed are the ones intended.
+
 .SH "CONFORMING TO"
 RFC 1123,
 .IR "Requirements for Internet Hosts \- Application and Support" .
@@ -744,8 +808,8 @@ extremely small ROM.
 Embedded TCP stacks are now readily available, and generally occupy
 less storage than the hardware driver layer. Vendors of embedded
 network hardware should strongly consider using a simple TCP-based
-protocol such as HTTP 1.0 instead.
-.IP
+protocol such as HTTP/1.0 instead.
+.PP
 \[lq]Those who do not understand TCP are condemned to reimplement it,
 poorly, at the wrong level.\[rq]
 

@@ -19,6 +19,12 @@
 
 #define DAEMON_DEFAULT_MAP_STEPS 4096 /* Timeout after this many steps */
 
+enum normalizations {
+    NORM_NONE,
+    NORM_ROOT,
+    NORM_PATH
+};
+
 struct daemon_options {
     bool cancreate;
     bool secure;
@@ -45,6 +51,7 @@ struct daemon_options {
     struct strlist listen_addrs;
     int ndirs;
     const char * const **dirs;
+    enum normalizations normalize;
 };
 
 extern struct daemon_options dopt;
