@@ -5,8 +5,13 @@ does not require the daemon to be run as root, but make sure that all
 implications of this are understood, such as the consequences of
 symbolic links.
 
-The --rooted option can be used to add a slash to the beginning of the
-client's requested path if the client did not include one already.
+The --normalize option can be used to add a slash to the beginning of the
+client's requested path if the client did not include one already, and
+to handle "." and ".." filename options.
+
+On Linux systems with openat2(2), then new --jail option supports
+functionality similar to --secure without requiring the daemon to run
+as root.
 
 		=======================================
 
