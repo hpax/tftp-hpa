@@ -1,3 +1,33 @@
+Changes in 6.2:
+	The client adds mget and mput commands for unambiguous multi-file
+	transfers to or from a specified directory.  Command help and
+	selection have also been reorganized for clearer interactive use.
+
+	Command-mode failures, including transfer timeouts and interrupts,
+	now return a nonzero exit status.
+
+	tftpd adds --jail as an alternative to --secure on Linux systems
+	with openat2(2). It confines file access without chrooting, so the
+	daemon can retain access to configuration files and /dev/log and
+	does not need to start as root.
+
+	A new --normalize[=none|root|path] option can be used to
+	transform pathnames to standard form without needing explicit
+	filename remapping rules. Normalization happens after filename
+	remapping, and --normalize=path with --path-prefix can provide
+	secure-like path restrictions without a chroot or a complete
+	remapping rules file.
+
+	The --map-test option is now available in builds without regular
+	expression remapping support, allowing filename normalization to be
+	tested.
+
+	tftpd now logs successful and failed transfers, and stderr logging
+	includes the process ID.  Improve listener behavior for IPv6-only
+	sockets and ensure invalid path requests do not leak file
+	descriptors.
+
+
 Changes in 6.1:
 	The client and server now use a shared transfer implementation,
 	improving consistency for block/window handling, retransmission,
