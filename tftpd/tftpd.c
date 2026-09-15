@@ -668,13 +668,17 @@ int main(int argc, char **argv)
         case OPT_REJECT_ALL:
             dopt.reject_all_options = true;
             break;
-#ifdef WITH_REGEX
         case 'm':
+#ifdef WITH_REGEX
             if (dopt.rewrite_file) {
                 tftpd_log(LOG_ERR, "Multiple -m options");
                 exit(EX_USAGE);
             }
             dopt.rewrite_file = optarg;
+#else
+            tftp_log(LOG_ERR, "--map-file not supported by this build");
+            exit(EX_USAGE);
+#endif
             break;
         case OPT_MAP_STEPS:
         {
@@ -691,7 +695,6 @@ int main(int argc, char **argv)
             dopt.map_test_file = optarg;
             dopt.use_stderr = true;
             break;
-#endif
         case 'v':
             dopt.verbosity++;
             break;
@@ -733,6 +736,7 @@ int main(int argc, char **argv)
 #ifdef WITH_REGEX
     if (dopt.rewrite_file)
         rewrite_rules = read_remap_rules(dopt.rewrite_file);
+#endif
 
     if (dopt.map_test_file) {
         FILE *tf = fopen(dopt.map_test_file, "r");
@@ -745,7 +749,6 @@ int main(int argc, char **argv)
         fclose(tf);
         exit(0);
     }
-#endif
 
     if (dopt.path_prefix) {
         if (!is_directory(dopt.path_prefix)) {
@@ -1672,6 +1675,7 @@ static size_t rewrite_macros(char macro, const char **output)
         return -1;              /* No such macro */
     }
 }
+#endif
 
 static int test_validate_fail(const char *filename, int mode,
                               const struct formats *pf,
@@ -1737,8 +1741,6 @@ static void rewrite_test(FILE *tf)
     }
     xfree(line);
 }
-
-#endif
 
 /*
  * Modify the filename, if applicable.  If it returns NULL, deny the access.
