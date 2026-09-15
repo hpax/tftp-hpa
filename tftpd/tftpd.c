@@ -37,6 +37,14 @@
 #include <sys/filio.h>          /* Necessary for FIONBIO on Solaris */
 #endif
 
+#if defined(HAVE_OPENAT2) && \
+    defined(RESOLVE_IN_ROOT) && \
+    defined(RESOLVE_NO_MAGICLINKS)
+#define WITH_JAIL 1
+#else
+#define WITH_JAIL 0
+#endif
+
 #define	TIMEOUT 1000000         /* Default timeout (us) */
 #define TRIES   6               /* Number of attempts to send each packet */
 #define TIMEOUT_LIMIT ((1 << TRIES)-1)
@@ -100,6 +108,10 @@ static size_t rewrite_macros(char macro, const char **output);
 #else
 #define rewrite_rules NULL
 #define rewrite_macros NULL
+#endif
+
+#if WITH_JAIL
+static int jail_root = -1;
 #endif
 
 static char *normalize_path(char *name);
@@ -433,6 +445,7 @@ static const struct option long_options[] = {
     { "create",      0, NULL, 'c' },
     { "secure",      0, NULL, 's' },
     { "chroot",      0, NULL, 's' },
+    { "jail",        0, NULL, 'j' },
     { "permissive",  0, NULL, 'p' },
     { "verbose",     0, NULL, 'v' },
     { "verbosity",   1, NULL, OPT_VERBOSITY },
@@ -465,7 +478,7 @@ static const struct option long_options[] = {
     { "normalize",   2, NULL, OPT_NORMALIZE },
     { NULL, 0, NULL, 0 }
 };
-static const char short_options[] = "46cspvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
+static const char short_options[] = "46csjpvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
 
 static struct pollset *listen_set;
 
@@ -548,6 +561,14 @@ int main(int argc, char **argv)
             break;
         case 's':
             dopt.secure = true;
+            break;
+        case 'j':
+#if WITH_JAIL
+            dopt.jail = true;
+#else
+            tftpd_log(LOG_ERR, "--jail not supported by this OS or build");
+            exit(EX_USAGE);
+#endif
             break;
         case 'p':
             dopt.unixperms = true;
@@ -762,7 +783,8 @@ int main(int argc, char **argv)
     patherr = false;
     for (dopt.ndirs = 0; optind != argc; optind++) {
         const char *path = argv[optind];
-        const char * const *pathlist = parse_path(path, !dopt.secure);
+        const char * const *pathlist =
+            parse_path(path, !dopt.secure && !dopt.jail);
         if (!pathlist) {
             tftpd_log(LOG_ERR, "invalid directory path: %s", path);
             patherr = true;
@@ -782,17 +804,45 @@ int main(int argc, char **argv)
         exit(EX_USAGE);
     }
 
-    if (dopt.secure) {
+    if (dopt.secure && dopt.jail) {
+        tftpd_log(LOG_ERR, "--chroot and --jail are mutually exclusive");
+        exit(EX_USAGE);
+    }
+
+    if (dopt.secure || dopt.jail) {
         if (dopt.ndirs != 1) {
-            tftpd_log(LOG_ERR, "-s requires exactly one directory");
+            tftpd_log(LOG_ERR, "--chroot or --jail require exactly one directory");
             exit(EX_USAGE);
         }
 
         char *securepath = build_path(dopt.path_prefix, dopt.dirs[0]);
-        if (chdir(securepath)) {
-            tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
-            exit(EX_NOINPUT);
-        }
+        if (dopt.secure) {
+            if (chdir(securepath)) {
+                tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
+                exit(EX_NOINPUT);
+            }
+        } else
+#if WITH_JAIL
+        if (dopt.jail) {
+            /* This uses openat2() partly as a test */
+            static const struct open_how how = {
+                .flags   = O_RDONLY | O_DIRECTORY,
+                .resolve = RESOLVE_NO_MAGICLINKS
+            };
+            jail_root = openat2(AT_FDCWD, securepath, &how, sizeof how);
+            if (jail_root < 0) {
+                if (errno == ENOSYS || errno == EINVAL) {
+                    tftpd_log(LOG_ERR, "--jail not supported on this system");
+                    exit(EX_OSERR);
+                } else {
+                    tftpd_log(LOG_ERR, "%s: %s", securepath, strerror(errno));
+                    exit(EX_NOINPUT);
+                }
+            }
+        } else
+#endif
+            exit(EX_SOFTWARE);  /* Should never happen */
+
         free(securepath);
     }
 
@@ -1773,14 +1823,15 @@ static const char *rewrite_access(const struct formats *pf,
  * also, full path name must be given as we have no login directory.
  *
  * This function is also responsible for canonicalizing file paths.
- * If "secure" is set the file path is used as-is, as the kernel
- * is expected to enforce any namespace restrictions.
+ *
+ * If "secure" or "jail" is set the file path is used as-is, as the
+ * kernel is expected to enforce any namespace restrictions.
  */
 static int validate_access(const char *filename, int mode,
 			   const struct formats *pf, const char **errmsg)
 {
     struct stat stbuf;
-    int fd, wmode, rmode;
+    int fd, omode, wmode, rmode;
     char *fnbuf = NULL;
     const char * const **dirp;
     char stdio_mode[3];
@@ -1788,7 +1839,7 @@ static int validate_access(const char *filename, int mode,
     tsize_ok = false;
     *errmsg = NULL;
 
-    if (!dopt.secure) {
+    if (!dopt.secure && !dopt.jail) {
         const char **pathlist = parse_path(filename, true);
 
         if (!pathlist) {
@@ -1816,14 +1867,27 @@ static int validate_access(const char *filename, int mode,
     wmode = O_WRONLY | (dopt.cancreate ? O_CREAT : 0) |
         (pf->f_convert ? O_TEXT : O_BINARY);
     rmode = O_RDONLY | (pf->f_convert ? O_TEXT : O_BINARY);
-
 #ifndef HAVE_FTRUNCATE
     wmode |= O_TRUNC;		/* This really sucks on a dupe */
 #endif
 
+    omode = mode == WRQ ? wmode : rmode;
+
     tftpd_log(LOG_DEBUG, "%s: final filename: %s", from_str, filename);
 
-    fd = open(filename, mode == RRQ ? rmode : wmode, 0666);
+#if WITH_JAIL
+    if (jail_root >= 0) {
+        struct open_how how;
+        memset(&how, 0, sizeof how);
+        how.flags   = omode;
+        how.mode    = (omode & O_CREAT) ? 0666 : 0;
+        how.resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS;
+        fd = openat2(jail_root, filename, &how, sizeof how);
+    } else
+#endif
+    {
+        fd = open(filename, omode, 0666);
+    }
     if (fd < 0)
         fd = -errno;
     if (fnbuf)

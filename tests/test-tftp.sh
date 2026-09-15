@@ -120,7 +120,7 @@ start_server() {
 			      -e "s/([^[:space:]]+)/-a \\1:$PORT/g")
 	TFTPD_CMD+=($addrs)
     fi
-    TFTPD_CMD+=(-c -/ --path-prefix "$SERVER_DIR" /files /upload)
+    TFTPD_CMD+=(-c --jail "$SERVER_DIR")
     print_info "${TFTPD_CMD[*]}"
     "${TFTPD_CMD[@]}" &
     TFTPD_PID=$!

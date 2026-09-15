@@ -173,7 +173,34 @@ oppposed to running the daemon as an unprivileged user and using the
 .BR \-\-normalize ,
 and/or
 .B \-\-path-prefix
-options instead.
+options instead, or if supported on your system, the
+.B \-\-jail
+option.
+.TP
+\fB\-j\fP, \fB\-\-jail\fP
+Resolve file names under a virtual root directory. This is an
+alternative to
+.B \-\-secure
+which may allow the daemon to not be started as root, but requires
+that the
+.MR openat2 2
+system call to be supported on the running system; as of September
+2026 this is only supported on newer Linux systems. If your system
+does not support
+.B \-\-jail
+it exits with an error message. When
+.B \-\-jail
+is specified, exactly one
+.I directory
+should be specified on the command line.
+.IP
+Note that when
+.B \-\-jail
+is used, none of the path name checks
+described under
+.I "PATH VALIDATION"
+below are performed; any desired checks will have to be implemented
+using explicit remap rules.
 .TP
 \fB\-\-path-prefix\fP \fIprefix\fP
 Prepends \fIprefix\fP to the local filesystem path
@@ -188,6 +215,8 @@ permissions checks.
 .IP
 If the
 .B \-\-secure
+or
+.B \-\-jail
 option is used,
 .I prefix
 is instead prepended to the root path; in other words:
@@ -326,6 +355,8 @@ This option can be used with
 .B \-\-path-prefix
 to obtain an effect similar to
 .B \-\-secure
+or
+.B \-\-jail
 without needing a full remap file. See "FILENAME PROCESSING" below.
 .TP
 \fB\-v\fP, \fB\-\-verbose\fP
@@ -497,7 +528,9 @@ option above.
 .IP "3." 4n
 If the
 .B \-\-secure
-option is
+or
+.B \-\-jail
+options are
 .I not
 used, path validation. See "PATH VALIDATION" below.
 .IP "4." 4n
@@ -678,7 +711,9 @@ process.
 .SH "PATH VALIDATION"
 If the
 .B \-\-secure
-flag is
+or
+.B \-\-jail
+flags are
 .I not
 given on the command line,
 .B tftpd
@@ -721,6 +756,8 @@ path validation has taken place.
 .PP
 When
 .B \-\-secure
+or
+.B \-\-jail
 is used, no path validation is performed by
 .B tftpd
 itself.
@@ -756,9 +793,10 @@ Access to files is restricted by the list of directories passed to
 .B tftpd
 on the command line. Alternatively, the
 .B \-\-secure
-flag is used to set up a
-.MR chroot 2
-environment for the server to run in once a connection has been set up.
+or
+.B \-\-jail
+flag can be used to set up a virtual root environment for the server
+to run in once a connection has been set up.
 .PP
 The filename mapping facility
 .RB ( \-\-map-file
@@ -816,6 +854,7 @@ poorly, at the wrong level.\[rq]
 .SH "SEE ALSO"
 .MR tftp 1 ,
 .MR chroot 2 ,
+.MR openat2 2 ,
 .MR umask 2 ,
 .MR services 5 ,
 .MR systemd.socket 5 ,

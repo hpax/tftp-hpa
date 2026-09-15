@@ -28,6 +28,7 @@ enum normalizations {
 struct daemon_options {
     bool cancreate;
     bool secure;
+    bool jail;
     bool unixperms;
     bool standalone;
     bool nodaemon;
