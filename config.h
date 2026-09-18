@@ -512,6 +512,20 @@ const char *inet_ntop(int, const void *, char *, socklen_t);
 # define fflush_unlocked(f) fflush(f)
 #endif
 
+/* strnlen(): an unoptimized version is small enough to inline */
+#ifndef HAVE_STRNLEN
+static inline size_t strnlen(const char *str, size_t n)
+{
+    size_t len = 0;
+    while (len < n) {
+        if (!str[len])
+            break;
+        len++;
+    }
+    return len;
+}
+#endif
+
 /* HAVE_IPV6 as a boolean */
 #ifdef HAVE_IPV6
 # define WITH_IPV6 1

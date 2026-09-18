@@ -145,8 +145,6 @@ AC_CHECK_FUNCS(strtoull)
 
 AC_CHECK_FUNCS(random)
 
-AC_CHECK_FUNCS(vasprintf)
-
 AC_CHECK_FUNCS(fread_unlocked)
 AC_CHECK_FUNCS(fwrite_unlocked)
 AC_CHECK_FUNCS(getc_unlocked)
@@ -211,6 +209,9 @@ AC_SEARCH_LIBS(dup2, , ,[AC_MSG_ERROR(dup2 not found; the bundled ersatz dup2() 
 
 PA_SEARCH_LIBS_AND_ADD(stpcpy, , stpcpy)
 AC_CHECK_FUNCS(mempcpy)
+AC_CHECK_FUNCS(strnlen)
+AC_CHECK_FUNCS(vasprintf)
+
 
 AS_IF([$XTRA], [XTRALIBS="$OBJROOT/lib/libxtra.a $XTRALIBS"])
 
