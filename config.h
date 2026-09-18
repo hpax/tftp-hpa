@@ -523,6 +523,10 @@ const char *inet_ntop(int, const void *, char *, socklen_t);
 
 #define ARRAY_SIZE(x)  (sizeof(x)/sizeof(x[0]))
 #define ARRAY_END(x)   (&(x)[ARRAY_SIZE(x)])
+#define ARRAY_FOREACH(var,array) \
+    for ((var) = (array); (var) < ARRAY_END(array); (var)++)
+#define MIN(x,y) ((x) < (y) ? (x) : (y))
+#define MAX(x,y) ((x) > (y) ? (x) : (y))
 
 /* tftp-hpa version and configuration strings */
 

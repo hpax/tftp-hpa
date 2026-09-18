@@ -145,6 +145,8 @@ AC_CHECK_FUNCS(strtoull)
 
 AC_CHECK_FUNCS(random)
 
+AC_CHECK_FUNCS(vasprintf)
+
 AC_CHECK_FUNCS(fread_unlocked)
 AC_CHECK_FUNCS(fwrite_unlocked)
 AC_CHECK_FUNCS(getc_unlocked)

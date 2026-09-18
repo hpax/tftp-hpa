@@ -11,6 +11,13 @@
 
 #include "config.h"
 
+/*
+ * Truncate inbound error messages longer than this; this saves memory but
+ * also strings that long are unlikely be meaningful in practice.
+ */
+#define TFTP_ERROR_MAX_MSG		125
+#define TFTP_ERROR_MAX_PACKET_SIZE	(TFTP_ERROR_MAX_MSG + 3)
+
 extern const char *_progname;
 extern pid_t _progpid;
 void set_progname(const char *);	/* main() should pass argv[0] here */
@@ -21,7 +28,67 @@ MALLOC_FUNC void *xmalloc(size_t);
 CALLOC_FUNC void *xcalloc(size_t, size_t);
 REALLOC_FUNC void *xrealloc(void *, size_t);
 NEWBUF_FUNC char *xstrdup(const char *);
-void xfree(void *);
+static inline void xfree(void *ptr)
+{
+    /* This is paranoia: free() is supposed to handle NULL already */
+    if (ptr)
+        free(ptr);
+}
+
+/*
+ * Allocates a buffer for the given pointer, for xnewn() with an array count.
+ */
+#define xnewn(ptr,n)                            \
+    do {                                        \
+        void **pp = (void **)&(ptr);            \
+        void *p = xcalloc(n, sizeof *(ptr));    \
+        *pp = p;                                \
+    } while (0)
+
+#define xnew(ptr) xnewn(ptr,1)
+
+/*
+ * Frees a value and sets the corresponding pointer to NULL.
+ * This blindly assumes all data pointers have the same representation;
+ * otherwise this would require using typeof().
+ */
+#define xdelete(ptr)                                    \
+    do {                                                \
+        void **pp = (void **)&(ptr);                    \
+        void *p = *pp;                                  \
+        if (p) {                                        \
+            *pp = NULL;                                 \
+            free(p);                                    \
+        }                                               \
+    } while (0)
+
+/*
+ * Equivalent, but it takes a pointer to a pointer which might be NULL
+ * itself.
+ */
+#define xdeletep(ptrp)                                  \
+    do {                                                \
+        void **pp = (void **)(ptrp);                    \
+        if (pp) {                                       \
+            void *p = *pp;                              \
+            if (p) {                                    \
+                *pp = NULL;                             \
+                free(p);                                \
+            }                                           \
+        }                                               \
+    } while (0)
+
+/*
+ * Clears a buffer based on its type
+ */
+#define xzeron(ptr,n) memset((ptr), 0, (n)*sizeof *(ptr))
+#define xzero(ptr)    xzeron(ptr,1)
+
+/*
+ * Error checking versions of [v]asprintf()
+ */
+PRINTF_FUNC(2,3) int xasprintf(char **strp, const char *fmt, ...);
+PRINTF_FUNC(2,0) int xvasprintf(char **strp, const char *fmt, va_list ap);
 
 #ifndef HAVE_RANDOM
 static inline long random(void)
@@ -123,6 +190,7 @@ static inline int setsockint(int sockfd, int level, int optname,
 }
 
 extern int segsize;
+#define MIN_SEGSIZE	8       /* Really impractically small, but... */
 #define MAX_SEGSIZE	65464
 
 int pick_port_bind(int sockfd, union sock_addr *myaddr);
@@ -141,5 +209,20 @@ static inline int tftp_sigmask(int how, const sigset_t *set, sigset_t *oset)
     return rv;
 #endif
 }
+
+static inline unsigned char ascii_tolower(unsigned char c)
+{
+    if ((unsigned char)(c - 'A') <= (unsigned char)('Z' - 'A'))
+        c += 'a' - 'A';
+    return c;
+}
+
+bool ascii_strcaseeq(const char *s1, const char *s2);
+
+/*
+ * A conservative estimate of the maximum number of decimal digits
+ * that can represent a certain unsigned integer type
+ */
+#define DIGIT_SPACE(x) ((sizeof(x)*5+1) >> 1)
 
 #endif
