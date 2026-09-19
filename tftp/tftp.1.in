@@ -5,10 +5,10 @@
 .\" Copyright (c) 1990, 1993, 1994
 .\"     The Regents of the University of California.  All rights reserved.
 .\"
-.\" Copyright 2001 H. Peter Anvin - All Rights Reserved
+.\" Copyright 2001-2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTP 1 "23 July 2008" "tftp-hpa @@VERSION@@" "User's Manual"
+.TH TFTP 1 "18 September 2026" "tftp-hpa @@VERSION@@" "User's Manual"
 
 .SH "NAME"
 .B tftp
