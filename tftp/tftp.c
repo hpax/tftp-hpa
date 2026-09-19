@@ -27,7 +27,7 @@ static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 
 static void nak(int, const char *);
-static int makerequest(struct tftphdr **,
+static int makerequest(struct tftphdr **, int *,
                        int, const char *, const char *,
                        unsigned int, unsigned int);
 static bool parse_oack(const struct tftphdr *, int, unsigned int,
@@ -155,7 +155,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    bool requested_options = xopt.max_blksize != SEGSIZE || requested_window;
+    int optionlen;
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
@@ -171,7 +171,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     }
 
     tftp_signal(SIGALRM, timer, 0);
-    size = makerequest(&req, WRQ, name, mode,
+    size = makerequest(&req, &optionlen, WRQ, name, mode,
                        xopt.max_blksize, requested_window);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
@@ -211,7 +211,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
             err = EX_PROTOCOL;
             goto abort;
         }
-        if (requested_options && ap_opcode == OACK) {
+        if (optionlen && ap_opcode == OACK) {
             if (!parse_oack(response, n, xopt.max_blksize, requested_window,
                             &negotiated_block, &negotiated_window)) {
                 nak(EOPTNEG, "Invalid option response");
@@ -323,7 +323,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     bool convert = !strcmp(mode, "netascii");
     unsigned int window;
     unsigned int negotiated_block, negotiated_window;
-    bool requested_options = xopt.max_blksize != SEGSIZE || requested_window;
+    int optionlen;
     uint16_t opcode;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
@@ -337,7 +337,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     }
     initial_packet = xmalloc(TFTP_REPLY_MAX_PACKET_SIZE);
 
-    size = makerequest(&req, RRQ, name, mode,
+    size = makerequest(&req, &optionlen, RRQ, name, mode,
                        xopt.max_blksize, requested_window);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
@@ -379,7 +379,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
             err = EX_PROTOCOL;
             goto abort;
         }
-        if (requested_options && opcode == OACK) {
+        if (optionlen && opcode == OACK) {
             if (!parse_oack(initial_packet, n, xopt.max_blksize,
                             requested_window,
                             &negotiated_block, &negotiated_window)) {
@@ -481,7 +481,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
 }
 
 static int
-makerequest(struct tftphdr **pkt,
+makerequest(struct tftphdr **pkt, int *optionlen_p,
             int request, const char *name, const char *mode,
             unsigned int requested_block, unsigned int requested_window)
 {
@@ -505,6 +505,8 @@ makerequest(struct tftphdr **pkt,
                        "%u", requested_window) + 1;
     }
     optionlen = cp - optionbuf;
+    if (optionlen_p)
+        *optionlen_p = optionlen;
 
     /*
      * The request is encoded into tp as: opcode(2) name NUL mode NUL.
