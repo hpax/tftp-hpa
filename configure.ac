@@ -221,8 +221,6 @@ dnl
 
 common_libs="$LIBS"
 
-AC_CHECK_DECLS(IPPORT_TFTP)
-
 AC_ARG_VAR([TFTPD_MAX_WINDOWSIZE],
  [maximum RFC 7440 windowsize accepted by tftpd (default: 256)])
 AS_IF([test -z "$TFTPD_MAX_WINDOWSIZE"], [TFTPD_MAX_WINDOWSIZE=256])
@@ -351,6 +349,7 @@ dnl by -Werror options, so run this *after* those options are added.
 dnl
 PA_CHECK_BAD_STDC_INLINE
 PA_C_TYPEOF
+PA_C_FLEXMEMBER
 PA_DEPEND
 
 AC_CONFIG_HEADERS([config/config.h])

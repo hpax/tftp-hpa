@@ -365,7 +365,7 @@ myrecvfrom(int s, void *buf, int len, unsigned int flags,
     bzero(myaddr, sizeof(*myaddr));
     if (n >= 0) {
         myaddr->sa.sa_family = from->sa.sa_family;
-        sa_set_port(myaddr, htons(IPPORT_TFTP));
+        sa_set_port(myaddr, htons(TFTP_IP_PORT));
     }
 
     return n;

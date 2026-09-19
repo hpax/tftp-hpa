@@ -504,7 +504,7 @@ int main(int argc, char *argv[])
         fallback_sp = xmalloc(sizeof(*fallback_sp));
         fallback_sp->s_name = (char *)"tftp";
         fallback_sp->s_aliases = NULL;
-        fallback_sp->s_port = htons(IPPORT_TFTP);
+        fallback_sp->s_port = htons(TFTP_IP_PORT);
         fallback_sp->s_proto = (char *)"udp";
         sp = fallback_sp;
     }

@@ -401,27 +401,14 @@ static inline void *mempcpy(void *dst, const void *src, size_t n)
 #endif
 
 /* netinet/in.h, and possible missing pieces */
-
 #include <netinet/in.h>
 
-#if !HAVE_DECL_IPPORT_TFTP && !defined(IPPORT_TFTP)
-#define IPPORT_TFTP 69
-#endif
-
-/* arpa/{inet,tftp}.h, and possible missing pieces */
-
+/* arpa/inet.h, and possible missing pieces */
 #ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
 #endif
-/* If we don't have arpa/tftp.h we have problems... */
-#include <arpa/tftp.h>
 
-#ifndef OACK
-#define OACK 6
-#endif
-#ifndef EOPTNEG
-#define EOPTNEG 8
-#endif
+#include "common/tftp.h"
 
 /* Prototypes for libxtra functions */
 

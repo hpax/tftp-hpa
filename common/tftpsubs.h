@@ -10,13 +10,7 @@
 #define TFTPSUBS_H
 
 #include "config.h"
-
-/*
- * Truncate inbound error messages longer than this; this saves memory but
- * also strings that long are unlikely be meaningful in practice.
- */
-#define TFTP_ERROR_MAX_MSG		125
-#define TFTP_ERROR_MAX_PACKET_SIZE	(TFTP_ERROR_MAX_MSG + 3)
+#include "common/tftp.h"
 
 extern const char *_progname;
 extern pid_t _progpid;
@@ -224,5 +218,28 @@ bool ascii_strcaseeq(const char *s1, const char *s2);
  * that can represent a certain unsigned integer type
  */
 #define DIGIT_SPACE(x) ((sizeof(x)*5+1) >> 1)
+
+/*
+ * Packet type and error name functions, for printing messages.
+ * packet_type() and error_msg() return a pointer into static memory;
+ * errpkt_to_string() allocates a string in heap storage.
+ *
+ * If error_msg() is passed a negative value, then it is assumed to be
+ * -errno, and the string is passed to strerror().
+ */
+const char *error_msg(int err);
+char *errpkt_to_string(const struct tftphdr *tp, int n);
+int make_errpacket(struct tftphdr **tpp, int error, const char *msg);
+
+extern const char * const packet_types[PTYPE_CNT];
+extern const char * const errmsgs[ETYPE_CNT];
+
+static inline const char *packet_type(uint16_t opcode)
+{
+    if (opcode >= PTYPE_CNT)
+        return "unknown";
+    else
+        return packet_types[opcode];
+}
 
 #endif
