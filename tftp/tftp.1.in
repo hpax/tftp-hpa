@@ -81,7 +81,8 @@ required.  Valid values are 1 through 32768.  The default does not request
 the option.
 .TP
 \fB\-T\fP, \fB\-\-no-tsize\fP
-Disable the sending of the RFC 2349 tsize (transfer size) option.
+Disable the sending of the RFC 2349 \fBtsize\fP (transfer size) option. The
+default is to send the option.
 .TP
 \fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
 Force the originating (local) port number to be in the specified range of port
@@ -96,8 +97,11 @@ Default to verbose mode. At
 Print the version number and configuration to standard output, then
 exit gracefully.
 .TP
-\fB\-h\fP, \fB\-\-help\fP
-Print a usage summary and exit.
+\fB\-h\fP, \fB\-\-help\fP [\fIcommand\fP]
+If \fIcommand\fP is specified, print help text for \fIcommand\fP and
+exit. Otherwise print a command line options summary and exit.
+.IP
+Use \fB\-c help\fP to get a list of commands available with \fB\-c\fP.
 
 .SH "COMMANDS"
 Once
@@ -235,6 +239,10 @@ Set the maximum retransmission interval, in seconds.
 \fBwindowsize\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option with \fIwindow-size\fP
 data blocks per window. Valid values are 1 through 32768.
+.TP
+\fBtsize\fP
+Toggle sending the RFC 2349 \fBtsize\fP (transfer size) option. The
+default is on, unless the \fB\-\-no-tsize\fP command line option was given.
 .TP
 .B trace
 Toggle packet tracing (a debugging feature.)
