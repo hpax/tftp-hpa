@@ -22,6 +22,7 @@ struct tftp_options {
     const struct modes *mode;
     bool trace;
     bool literal;
+    bool tsize;
     bool iscmd;
 };
 

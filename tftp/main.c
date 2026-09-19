@@ -55,7 +55,8 @@ static const struct modes modes[] = {
 struct tftp_options copt = {
     .mode = MODE_DEFAULT,
     .rexmtval = TIMEOUT,
-    .maxtimeout = TIMEOUT_LIMIT * TIMEOUT
+    .maxtimeout = TIMEOUT_LIMIT * TIMEOUT,
+    .tsize = true
 };
 
 struct common_options xopt = {
@@ -115,6 +116,7 @@ static int setverbose(int, char **);
 static int status(int, char **);
 static int setliteral(int, char **);
 static int setwindowsize(int, char **);
+static int settsize(int, char **);
 
 static void command(void);
 
@@ -274,6 +276,13 @@ static const struct cmd cmdtab[] = {
         "    Set the maximum retransmission interval in seconds.\n"
     },
     {
+        "tsi[ze]", settsize,
+        "toggle sending tsize option",
+        "  tsize\n"
+        "    Toggle the sending of the TFTP tsize (transfer size) option.\n"
+        "    The default is to send the tsize option.\n"
+    },
+    {
         "win[dowsize]", setwindowsize,
         "set the requested transfer window size",
         "  windowsize size\n"
@@ -324,6 +333,7 @@ static void usage(int errcode)
             "    -R, --port-range min:max   use emhermeral ports in the given range\n"
             "    -B, --blocksize size       set the requested transfer block size\n"
             "    -W, --windowsize size      set the requested transfer window size\n"
+            "    -T, --no-tsize             disable sending the tsize TFTP option\n"
             "    -c, --command command      execute \"command\", then exit (must be last)\n",
             _progname);
 
@@ -362,6 +372,7 @@ static const struct option long_options[] = {
     { "netascii",   no_argument,       NULL, 'a' },
     { "binary",     no_argument,       NULL, 'b' },
     { "octet",      no_argument,       NULL, 'b' },
+    { "no-tsize",   no_argument,       NULL, 'T' },
     { "help",       optional_argument, NULL, 'h' },
     { NULL,         0,                 NULL, 0 }
 };
@@ -475,6 +486,9 @@ int main(int argc, char *argv[])
                         optarg, TFTP_MAX_WINDOWSIZE);
                 exit(EX_USAGE);
             }
+            break;
+        case 'T':
+            copt.tsize = false;
             break;
         case 'h':
             if (optarg && *optarg)
@@ -1107,6 +1121,15 @@ static int setliteral(int argc, char *argv[])
     return 0;
 }
 
+static int settsize(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;                 /* Quiet unused warning */
+    copt.tsize = !copt.tsize;
+    printf("tsize option %s.\n", copt.tsize ? "on" : "off");
+    return 0;
+}
+
 static int status(int argc, char *argv[])
 {
     (void)argc;
@@ -1120,8 +1143,9 @@ static int status(int argc, char *argv[])
            copt.literal ? "on" : "off");
     printf("Rexmt-interval: %d seconds, Max-timeout: %d seconds\n",
            copt.rexmtval, copt.maxtimeout);
-    printf("Blocksize: %u, windowsize: %u\n", xopt.max_blksize,
-           xopt.max_windowsize ? xopt.max_windowsize : 1);
+    printf("Blocksize: %u, windowsize: %u, tsize: %s\n", xopt.max_blksize,
+           xopt.max_windowsize ? xopt.max_windowsize : 1,
+           copt.tsize ? "on" : "off");
     return 0;
 }
 

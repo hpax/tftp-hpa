@@ -80,6 +80,9 @@ Request the RFC 7440 \fBwindowsize\fP option.  This permits up to
 required.  Valid values are 1 through 32768.  The default does not request
 the option.
 .TP
+\fB\-T\fP, \fB\-\-no-tsize\fP
+Disable the sending of the RFC 2349 tsize (transfer size) option.
+.TP
 \fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
 Force the originating (local) port number to be in the specified range of port
 numbers.

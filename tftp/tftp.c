@@ -27,7 +27,7 @@ static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 static void nak(int, const char *);
 static int makerequest(struct tftphdr **, int *,
                        int, const char *, const char *,
-                       unsigned int, unsigned int);
+                       unsigned int, unsigned int, off_t);
 static bool parse_oack(const struct tftphdr *, int, unsigned int,
                        unsigned int, unsigned int *, unsigned int *);
 static void printstats(const char *, uintmax_t);
@@ -125,7 +125,8 @@ static const struct tftp_xfer_ops client_xfer_ops = {
  */
 #define OPT_SPACE(x) (sizeof(x) + DIGIT_SPACE(uintmax_t) + 1)
 
-#define TFTP_OPTION_SPACE (OPT_SPACE("blksize") + OPT_SPACE("windowsize"))
+#define TFTP_OPTION_SPACE \
+    (OPT_SPACE("blksize") + OPT_SPACE("windowsize") + OPT_SPACE("tsize"))
 
 /*
  * The maximum size of a reply packet (ACK, ERROR, OACK or
@@ -157,6 +158,11 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
+    struct stat st;
+    off_t tsize = -1;
+
+    if (!convert && !fstat(fd, &st) && S_ISREG(st.st_mode))
+        tsize = st.st_size;
 
     response = xmalloc(TFTP_REPLY_MAX_PACKET_SIZE);
 
@@ -170,7 +176,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
 
     tftp_signal(SIGALRM, timer, 0);
     size = makerequest(&req, &optionlen, WRQ, name, mode,
-                       xopt.max_blksize, requested_window);
+                       xopt.max_blksize, requested_window, tsize);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         err = EX_OSERR;
@@ -334,7 +340,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     initial_packet = xmalloc(TFTP_REPLY_MAX_PACKET_SIZE);
 
     size = makerequest(&req, &optionlen, RRQ, name, mode,
-                       xopt.max_blksize, requested_window);
+                       xopt.max_blksize, requested_window, 0);
     if (size < 0) {
         fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
         err = EX_OSERR;
@@ -479,7 +485,8 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
 static int
 makerequest(struct tftphdr **pkt, int *optionlen_p,
             int request, const char *name, const char *mode,
-            unsigned int requested_block, unsigned int requested_window)
+            unsigned int requested_block, unsigned int requested_window,
+            off_t tsize)
 {
     struct tftphdr *tp;
     char *cp;
@@ -499,6 +506,11 @@ makerequest(struct tftphdr **pkt, int *optionlen_p,
         cp = mempcpy(cp, "windowsize", sizeof "windowsize");
         cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
                        "%u", requested_window) + 1;
+    }
+    if (tsize >= 0) {
+        cp = mempcpy(cp, "tsize", sizeof "tsize");
+        cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
+                       "%"PRIuMAX, (uintmax_t)tsize) + 1;
     }
     optionlen = cp - optionbuf;
     if (optionlen_p)
@@ -567,19 +579,22 @@ parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
         value = strtoul(cp, &value_end, 10);
         if (errno || value_end != nul)
             return false;
-        if (!strcasecmp(option, "blksize")) {
+        if (ascii_strcaseeq(option, "blksize")) {
             if (block_found || requested_block == SEGSIZE ||
                 value < 8 || value > requested_block)
                 return false;
             *negotiated_block = (unsigned int)value;
             block_found = true;
-        } else if (!strcasecmp(option, "windowsize")) {
+        } else if (ascii_strcaseeq(option, "windowsize")) {
             if (window_found || !requested_window ||
                 value < 1 || value > requested_window)
                 return false;
             *negotiated_window = (unsigned int)value;
             window_found = true;
+        } else if (ascii_strcaseeq(option, "tsize")) {
+            /* For a get, should save the value for status + checking */
         } else {
+            /* Server sent us a unknown, unrequested option response... */
             return false;
         }
         found = true;
