@@ -79,8 +79,15 @@ static unsigned int windowsize = 1;
 static union sock_addr myaddr;  /* Local address */
 static union sock_addr from;    /* Remote address */
 static const char *from_str = "<client>";
-static off_t tsize;
-static bool tsize_ok;
+enum tsize_mode {
+    TSIZE_NAK,                  /* tsize not possible */
+    TSIZE_READ,                 /* tsize valid read size from server */
+    TSIZE_WRITE                 /* tsize write size from client */
+};
+static struct tsize {
+    enum tsize_mode mode;
+    off_t size;
+} tsize;
 
 struct daemon_options dopt = {
     .max_windowbytes = MAX_WINDOWBYTES,
@@ -1536,11 +1543,31 @@ static void negotiate_tsize(void)
 {
     struct daemon_protocol_option *ts = opt_requested(PO_TSIZE);
 
-    if (ts && tsize_ok) {
-        /* XXX: this really should be: is this an RRQ? */
-        if (!ts->val)
-            ts->val = tsize;
+    if (!ts)
+        return;
+
+    switch (tsize.mode) {
+    case TSIZE_NAK:
+        /* RRQ, but the size is not available (netascii) */
+        break;
+    case TSIZE_READ:
+        /*
+         * RRQ, and the size is available (octet). However, RFC 2349
+         * requires that the option value is 0, so refuse the option
+         * if the value is anything else.
+         */
+        if (!ts->val) {
+            ts->val = tsize.size;
+            ts->flags |= POF_ACK;
+        }
+        break;
+    case TSIZE_WRITE:
+        /* WRQ: echo back the tsize specified. */
+        tsize.size = ts->val;
         ts->flags |= POF_ACK;
+        break;
+    default:
+        abort();            /* Impossible */
     }
 }
 
@@ -1881,7 +1908,7 @@ static int validate_access(const char *filename, int mode,
     const char * const **dirp;
     char stdio_mode[3];
 
-    tsize_ok = false;
+    tsize.mode = TSIZE_NAK;
     *errmsg = NULL;
 
     if (!dopt.secure && !dopt.jail) {
@@ -1953,9 +1980,9 @@ static int validate_access(const char *filename, int mode,
             *errmsg = "File must have global read permissions";
             return (EACCESS);
         }
-        tsize = stbuf.st_size;
+        tsize.size = stbuf.st_size;
         /* We don't know the tsize if conversion is needed */
-        tsize_ok = !pf->f_convert;
+        tsize.mode = pf->f_convert ? TSIZE_NAK : TSIZE_READ;
     } else {
         if (!dopt.unixperms) {
             if ((stbuf.st_mode & (S_IWRITE >> 6)) == 0) {
@@ -1973,8 +2000,7 @@ static int validate_access(const char *filename, int mode,
 	  return (EACCESS);
 	}
 #endif
-        tsize = 0;
-        tsize_ok = true;
+        tsize.mode = TSIZE_WRITE;
     }
 
     stdio_mode[0] = (mode == RRQ) ? 'r' : 'w';
