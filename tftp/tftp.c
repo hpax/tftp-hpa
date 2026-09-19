@@ -20,8 +20,6 @@
 extern union sock_addr peeraddr; /* filled in by main */
 extern int f;                    /* the opened socket */
 
-#define USEC_PER_SEC 1000000UL
-static char *ackbuf;
 static unsigned long timeout;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
@@ -291,8 +289,6 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     if (file)
         fclose(file);
     xfree(response);
-    xfree(ackbuf);
-    ackbuf = NULL;
     stopclock();
     if (amount > 0)
         printstats("Sent", amount);
@@ -607,7 +603,7 @@ static void nak(int error, const char *msg)
 
     if (copt.trace)
         tpacket("sent", tp, length);
-    if (sendto(f, ackbuf, length, 0, &peeraddr.sa,
+    if (sendto(f, tp, length, 0, &peeraddr.sa,
                sizeof peeraddr) != length)
         perror("nak");
 
