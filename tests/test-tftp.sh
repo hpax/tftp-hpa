@@ -15,6 +15,7 @@ PORT="${PORT:-6969}"
 PORTRANGE="${PORTRANGE:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
 ANYADDR="${ANYADDR:-0}"
+TSIZE="${TSIZE:-1}"
 TESTROOT=$(mktemp -d)
 SERVER_DIR="$TESTROOT"
 FILES_DIR="$TESTROOT/files"
@@ -209,6 +210,10 @@ test_download() {
 	*)     mode=octet ;;
     esac
 
+    if [ 0"$TSIZE" -eq 0 ]; then
+	tftp_options+=(-T)
+    fi
+
     print_info "Testing download: $filename"
 
     # Download using tftp
@@ -260,6 +265,10 @@ test_upload() {
 	*.txt) mode=netascii ;;
 	*)     mode=octet ;;
     esac
+
+    if [ 0"$TSIZE" -eq 0 ]; then
+	tftp_options+=(-T)
+    fi
 
     print_info "Testing upload: $filename"
 
