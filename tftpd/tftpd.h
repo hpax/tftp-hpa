@@ -1,10 +1,5 @@
-/* ----------------------------------------------------------------------- *
- *
- * SPDX-License-Identifier: BSD-3-Clause
- *
- *   Copyright 2001-2025 H. Peter Anvin - All Rights Reserved
- *
- * ----------------------------------------------------------------------- */
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Copyright 2001-2026 H. Peter Anvin - All Rights Reserved */
 
 /*
  * tftpd.h
@@ -24,6 +19,7 @@ typedef PRINTF_FUNC(2,3) void (*log_func)(int, const char *, ...);
 extern log_func tftpd_log;
 
 void set_signal(int, void (*)(int), int);
+void tftpd_sigmask(int how, const sigset_t *set, sigset_t *oset);
 
 int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam);
 

@@ -304,3 +304,25 @@ int get_nullfd(void)
 
     return nullfd;
 }
+
+/*
+ * Similar to strcasecmp() but only for ASCII, and returns true on match
+ */
+bool ascii_strcaseeq(const char *s1, const char *s2)
+{
+    unsigned char c1, cx;
+
+    do {
+        c1 = *s1++;
+        cx = c1 ^ *s2++;
+
+        if (unlikely(cx)) {
+            if (cx != 0x20)
+                return false;
+            if ((unsigned char)((c1 | cx) - 'a') > (unsigned char)('z' - 'a'))
+                return false;
+        }
+    } while (c1);
+
+    return true;
+}

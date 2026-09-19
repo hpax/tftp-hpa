@@ -23,11 +23,12 @@ enum tftp_xfer_status {
 
 struct tftp_xfer_result {
     enum tftp_xfer_status status;
-    int error;
     uintmax_t bytes;
-    uint16_t last_block;
     /* Caller-owned control or input packet storage. */
     const struct tftphdr *packet;
+    int packet_len;
+    int error;
+    uint16_t last_block;
 };
 
 /*
@@ -66,15 +67,25 @@ struct tftp_xfer_io_ops {
 };
 
 struct tftp_xfer {
+    /* Negotiated maximum data bytes in each DATA packet. */
     unsigned int blocksize;
+    /* Negotiated number of DATA packets acknowledged as a window. */
     unsigned int windowsize;
+    /* Block number to use after the 16-bit sequence number wraps. */
     uint16_t rollover;
+    /* Resend a received OACK by retransmitting the current send window. */
     bool resend_oack;
+    /* Storage used for incoming control packets during a send transfer. */
     void *control;
+    /* Size of control, in bytes. */
     int control_size;
+    /* Caller state passed to every transport callback. */
     void *context;
+    /* Transport callbacks for sending, receiving, retries, and tracing. */
     const struct tftp_xfer_ops *ops;
+    /* Caller state passed to every file I/O callback. */
     void *io_context;
+    /* File I/O callbacks used to supply or consume DATA packets. */
     const struct tftp_xfer_io_ops *io_ops;
 };
 
@@ -84,19 +95,26 @@ struct tftp_xfer {
 void tftp_xfer_send(const struct tftp_xfer *, struct tftp_xfer_result *);
 
 /*
- * Receive a file after any request or OACK exchange is complete.  ack is
- * the reusable ACK buffer.  input is caller-owned storage, separate from the
- * I/O adapter, with a capacity of at least TFTP_XFER_MAX_PACKET_SIZE;
- * received data is validated and copied to the adapter's reserved storage.
+ * Receive a file after any request or OACK exchange is complete.
+ * input is caller-owned storage, separate from the I/O adapter, with
+ * a capacity of at least xfer->blocksize + 4 (+5 if MSG_TRUNC is not
+ * supported); received data is validated and copied to the adapter's
+ * reserved storage.
+ *
  * input must not overlap initial_reply and must remain valid through any use
  * of result.packet.  initial_reply, when supplied, is sent before waiting
  * for DATA 1 (typically OACK or ACK 0).  initial_packet is DATA 1 that the
  * request exchange has already received.
+ *
+ * initial_reply and initial_packet are freed after they are consumed,
+ * in which case their pointers are set to NULL.
  */
-void tftp_xfer_recv(const struct tftp_xfer *, struct tftphdr *ack,
+void tftp_xfer_recv(const struct tftp_xfer *xfer,
                     struct tftphdr *input, int input_size,
-                    const struct tftphdr *initial_reply,
-                    int initial_reply_len, struct tftphdr *initial_packet,
-                    int initial_packet_len, struct tftp_xfer_result *);
+                    struct tftphdr **initial_reply,
+                    int initial_reply_len,
+                    struct tftphdr **initial_packet,
+                    int initial_packet_len,
+                    struct tftp_xfer_result *result);
 
 #endif /* TFTP_XFER_H */

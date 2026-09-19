@@ -50,6 +50,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
 
     result->last_block = 0;
     result->packet = NULL;
+    result->packet_len = 0;
     if (!xfer->io_ops) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_READ_ERROR, errno, 0);
@@ -120,6 +121,7 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
             packet_block = ntohs(ap->th_block);
             if (opcode == ERROR) {
                 result->packet = ap;
+                result->packet_len = n;
                 finish(xfer, result, TFTP_XFER_PEER_ERROR, 0, bytes);
                 return;
             }
@@ -173,13 +175,16 @@ void tftp_xfer_send(const struct tftp_xfer *xfer,
     }
 }
 
-void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
+void tftp_xfer_recv(const struct tftp_xfer *xfer,
                     struct tftphdr *input, int input_size,
-                    const struct tftphdr *initial_reply,
-                    int initial_reply_len, struct tftphdr *initial_packet,
-                    int initial_packet_len, struct tftp_xfer_result *result)
+                    struct tftphdr **initial_reply,
+                    int initial_reply_len,
+                    struct tftphdr **initial_packet,
+                    int initial_packet_len,
+                    struct tftp_xfer_result *result)
 {
     struct tftphdr * volatile dp;
+    struct tftphdr ack;
     const struct tftphdr *reply;
     const struct tftphdr *packet;
     sigjmp_buf retrybuf;
@@ -190,22 +195,30 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
     volatile uint16_t packet_block;
     volatile uintmax_t bytes = 0;
     volatile int packets_in_window = 0;
-    volatile bool initial_reply_pending = initial_reply != NULL;
-    volatile bool initial_packet_pending = initial_packet != NULL;
+    volatile bool initial_reply_pending;
+    volatile bool initial_packet_pending;
     int reply_len;
     int n;
     int size;
     bool final;
     bool restarted;
 
+    initial_reply_pending =
+        initial_reply_len >= 4 && initial_reply && *initial_reply;
+    initial_packet_pending =
+        initial_packet_len >= 4 && initial_packet && *initial_packet;
+
+    ack.th_opcode = htons(ACK);
+
     result->last_block = 0;
     result->packet = NULL;
+    result->packet_len = 0;
     if (!xfer->io_ops || !xfer->io_ops->write_finish) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
         return;
     }
-    if (!input || input_size < TFTP_XFER_MAX_PACKET_SIZE) {
+    if (!input || input_size < (int)xfer->blocksize + 4) {
         errno = EINVAL;
         finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, 0);
         return;
@@ -223,12 +236,11 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         xfer->ops->retry_enter(xfer->context, &retrybuf, restarted);
         if (initial_reply_pending || restarted) {
             if (initial_reply_pending) {
-                reply = initial_reply;
+                reply = *initial_reply;
                 reply_len = initial_reply_len;
             } else {
-                ack->th_opcode = htons((uint16_t)ACK);
-                ack->th_block = htons(last_acked);
-                reply = ack;
+                ack.th_block = htons(last_acked);
+                reply = &ack;
                 reply_len = 4;
             }
             if (xfer->ops->send(xfer->context, reply, reply_len) < 0) {
@@ -241,14 +253,13 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         if (initial_packet_pending) {
             n = initial_packet_len;
             initial_packet_pending = false;
-            packet = initial_packet;
+            packet = *initial_packet;
             opcode = ntohs(packet->th_opcode);
             packet_block = ntohs(packet->th_block);
         } else {
             xfer->ops->wait_begin(xfer->context);
             for (;;) {
-                n = xfer->ops->recv(xfer->context, input,
-                                    TFTP_XFER_MAX_PACKET_SIZE);
+                n = xfer->ops->recv(xfer->context, input, input_size);
                 if (n < 0) {
                     finish(xfer, result, TFTP_XFER_RECV_ERROR, errno,
                            bytes);
@@ -262,6 +273,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                 packet_block = ntohs(input->th_block);
                 if (opcode == ERROR) {
                     result->packet = input;
+                    result->packet_len = n;
                     finish(xfer, result, TFTP_XFER_PEER_ERROR, 0,
                            bytes);
                     return;
@@ -274,13 +286,14 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                  * RFC 7440 recovery is driven by the last contiguous
                  * block, including when it falls within the current window.
                  */
-                ack->th_opcode = htons((uint16_t)ACK);
-                ack->th_block = htons(last_received);
-                (void)xfer->ops->send(xfer->context, ack, 4);
+                ack.th_block = htons(last_received);
+                (void)xfer->ops->send(xfer->context, &ack, 4);
             }
         }
 
         initial_reply_pending = false;
+        xdeletep(initial_reply);
+
         if (n - 4 > (int)xfer->blocksize) {
             finish(xfer, result, TFTP_XFER_BAD_DATA, 0, bytes);
             return;
@@ -293,6 +306,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
             finish(xfer, result, TFTP_XFER_WRITE_ERROR, errno, bytes);
             return;
         }
+        xdeletep(initial_packet);
         bytes += size;
         final = size != (int)xfer->blocksize;
         packets_in_window++;
@@ -301,8 +315,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
         if (final || packets_in_window == (int)xfer->windowsize) {
             last_acked = packet_block;
             packets_in_window = 0;
-            ack->th_opcode = htons((uint16_t)ACK);
-            ack->th_block = htons(last_acked);
+            ack.th_block = htons(last_acked);
             if (xfer->io_ops->write_drain(xfer->io_context) < 0) {
                 if (!errno)
                     errno = EIO;
@@ -318,7 +331,7 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer, struct tftphdr *ack,
                        bytes);
                 return;
             }
-            if (xfer->ops->send(xfer->context, ack, 4) < 0) {
+            if (xfer->ops->send(xfer->context, &ack, 4) < 0) {
                 finish(xfer, result, TFTP_XFER_SEND_ERROR, errno,
                        bytes);
                 return;

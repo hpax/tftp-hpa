@@ -13,6 +13,7 @@
 #include "path.h"
 #include "strlist.h"
 #include "options.h"
+#include "common/clock.h"
 
 /*
  * Trivial file transfer protocol server.
@@ -53,6 +54,7 @@
 #define DEFAULT_WAITTIME	(900*1000000)
 
 static int peer;
+static struct passwd *pw;                /* The user to run as */
 static unsigned long timeout  = TIMEOUT;        /* Current timeout value */
 static unsigned long rexmtval = TIMEOUT;       /* Basic timeout value */
 static unsigned long maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
@@ -72,12 +74,10 @@ static uint16_t rollover_val = 0;
 #if MAX_WINDOWSIZE < 1
 # error MAX_WINDOWSIZE must be at least 1
 #endif
-static char *buf;
-static char *ackbuf;
 static unsigned int windowsize = 1;
-static uintmax_t requested_windowsize;
 
-static union sock_addr from;
+static union sock_addr myaddr;  /* Local address */
+static union sock_addr from;    /* Remote address */
 static const char *from_str = "<client>";
 static off_t tsize;
 static bool tsize_ok;
@@ -118,35 +118,52 @@ static char *normalize_path(char *name);
 
 static FILE *file;
 
-static int tftp(struct tftphdr *, int);
+static noreturn void run_worker(struct tftphdr *tp, int n);
+static noreturn void tftp(struct tftphdr *tp, int n);
+
 static void nak(int, const char *);
 static void timer(int);
-static void do_opt(const char *, const char *, char **);
-static void negotiate_windowsize(char **);
+static void parse_option(const char *, const char *);
+static size_t negotiate_options(struct tftphdr **tpp);
 static unsigned int io_ring_slots(void);
 static bool io_is_threaded(void);
 
-static bool set_blksize(uintmax_t *);
-static bool set_blksize2(uintmax_t *);
-static bool set_tsize(uintmax_t *);
-static bool set_timeout(uintmax_t *);
-static bool set_utimeout(uintmax_t *);
-static bool set_rollover(uintmax_t *);
-static bool set_windowsize(uintmax_t *);
+enum protocol_option_enum {
+    PO_BLKSIZE,
+    PO_BLKSIZE2,
+    PO_ROLLOVER,
+    PO_TIMEOUT,
+    PO_TSIZE,
+    PO_UTIMEOUT,
+    PO_WINDOWSIZE,
+    PO_NUM_OPTS
+};
+
+enum protocol_option_flags {
+    POF_NONE   = 0,
+    POF_REFUSE = 1,             /* Option to be refused */
+    POF_REQ    = 2,             /* Option requested */
+    POF_ACK    = 4              /* Option to be granted */
+};
 
 struct daemon_protocol_option {
-    const char *name;
-    bool (*handler)(uintmax_t *);
+    const char * const name;    /* Canonical name */
+    const unsigned int nsize;   /* Size of the name string including NUL */
+    enum protocol_option_flags flags;
+    const char *client_name;    /* Name as used by client */
+    uintmax_t val;		/* Requested/accepted value */
 };
-static struct daemon_protocol_option protocol_options[] = {
-    {"blksize",  set_blksize},
-    {"blksize2", set_blksize2},
-    {"tsize",    set_tsize},
-    {"timeout",  set_timeout},
-    {"utimeout", set_utimeout},
-    {"rollover", set_rollover},
-    {"windowsize", set_windowsize},
-    {NULL, NULL}
+
+#define POPT(n) { n, sizeof(n), POF_NONE, NULL, 0 }
+
+static struct daemon_protocol_option protocol_options[PO_NUM_OPTS] = {
+    POPT("blksize"),
+    POPT("blksize2"),
+    POPT("rollover"),
+    POPT("timeout"),
+    POPT("tsize"),
+    POPT("utimeout"),
+    POPT("windowsize")
 };
 
 /* Signal handlers: just set a variable and return */
@@ -275,6 +292,9 @@ static int lock_file(int fd, bool lock_write)
 #endif
 }
 
+#ifndef MSG_TRUNC
+#define MSG_TRUNC 0
+#endif
 
 static int recv_time(int s, void *rbuf, int len, unsigned int flags,
                      unsigned long *timeout_us_p)
@@ -300,8 +320,7 @@ static int daemon_xfer_send(void *vctx, const void *packet, int length)
 static int daemon_xfer_recv(void *vctx, void *packet, int length)
 {
     struct daemon_xfer_context *ctx = vctx;
-
-    return recv_time(peer, packet, length, 0, &ctx->timeout);
+    return recv_time(peer, packet, length, MSG_TRUNC, &ctx->timeout);
 }
 
 static void daemon_xfer_received(void *vctx, const struct tftphdr *packet,
@@ -337,15 +356,17 @@ static void daemon_xfer_wait_begin(void *vctx)
 static void daemon_xfer_dally(uint16_t last_acked)
 {
     int n;
+    struct tftphdr hdr;
 
     timeout_quit = true;
-    n = recv_time(peer, buf, PKTSIZE, 0, &timeout);
+    n = recv_time(peer, &hdr, 4, MSG_TRUNC, &timeout);
     timeout_quit = false;
 
-    if (n >= 4 &&
-        ntohs(((struct tftphdr *)buf)->th_opcode) == DATA &&
-        last_acked == ntohs(((struct tftphdr *)buf)->th_block))
-        (void)send(peer, ackbuf, 4, 0);
+    if (n >= 4 && hdr.th_opcode == htons(DATA) &&
+        hdr.th_block  == htons(last_acked)) {
+        hdr.th_opcode = htons(ACK);
+        (void)send(peer, &hdr, 4, 0);
+    }
 }
 
 static const struct tftp_xfer_ops daemon_xfer_ops = {
@@ -503,17 +524,12 @@ static bool is_directory(const char *path)
 int main(int argc, char **argv)
 {
     struct tftphdr *tp;
-    struct passwd *pw;
-    struct daemon_protocol_option *opt;
-    union sock_addr myaddr;
+    uint16_t th_opcode;
     int n;
     int fd = -1;
     pid_t pid;
     int c;
-    int setrv;
-    int die;
     char *ep;
-    uint16_t tp_opcode;
     bool patherr;
     pollset_cursor cursor;
     int nullfd;
@@ -675,17 +691,19 @@ int main(int argc, char **argv)
             dopt.spec_umask = true;
             break;
         case 'r':
-            for (opt = protocol_options; opt->name; opt++) {
-                if (!strcasecmp(optarg, opt->name)) {
-                    opt->name = "";     /* Don't support this option */
-                    break;
+        {
+            struct daemon_protocol_option *po;
+            ARRAY_FOREACH(po, protocol_options) {
+                if (ascii_strcaseeq(optarg, po->name)) {
+                    po->flags |= POF_REFUSE;
+                    goto done_refuse;
                 }
             }
-            if (!opt->name) {
-                tftpd_log(LOG_ERR, "Unknown option: %s", optarg);
-                exit(EX_USAGE);
-            }
+            tftpd_log(LOG_ERR, "Unknown option: %s", optarg);
+            exit(EX_USAGE);
+        done_refuse:
             break;
+        }
         case OPT_REJECT_ALL:
             dopt.reject_all_options = true;
             break;
@@ -976,6 +994,8 @@ int main(int argc, char **argv)
     if (dopt.spec_umask || !dopt.unixperms)
         umask(dopt.my_umask);
 
+    tp = xmalloc(PKTSIZE);
+
     while (1) {
         int what;
         int rv;
@@ -1017,16 +1037,13 @@ int main(int argc, char **argv)
         if (fd <= 0)
             continue;
 
-        buf = xmalloc(PKTSIZE);
         cygwin_set_socket_nonblock(fd, true);
-        n = myrecvfrom(fd, buf, PKTSIZE, 0, &from, &myaddr);
+        n = myrecvfrom(fd, tp, PKTSIZE, 0, &from, &myaddr);
         cygwin_set_socket_nonblock(fd, false);
 
         if (n < 0) {
             int error = errno;
 
-            xfree(buf);
-            buf = NULL;
             if (E_WOULD_BLOCK(error) || error == EINTR) {
                 continue;       /* Again, from the top */
             } else {
@@ -1048,6 +1065,15 @@ int main(int argc, char **argv)
             exit(EX_PROTOCOL);
         }
 #endif
+
+        /*
+         * Ignore the packet out of hand if it isn't a valid request packet
+         */
+        if (n < (int)sizeof(tp->th_opcode))
+            continue;           /* Packet too short */
+        th_opcode = ntohs(tp->th_opcode);
+        if (th_opcode != RRQ && th_opcode != WRQ)
+            continue;
 
         if (dopt.standalone) {
             union sock_addr sa;
@@ -1084,24 +1110,23 @@ int main(int argc, char **argv)
          * Now that we have read the request packet from the UDP
          * socket, we fork and go back to listening to the socket.
          */
-
         pid = fork();
         if (pid < 0) {
             tftpd_log(LOG_ERR, "fork: %s", strerror(errno));
             exit(EX_OSERR);     /* Return to inetd, just in case */
         } else if (pid == 0) {
-            break;              /* Child exits listen loop */
+            run_worker(tp, n);
+            abort();            /* It should not be possible to get here */
         }
 
         random_post_fork_parent();
-
-        /*
-         * The child owns this request.  Release the parent's copy before
-         * accepting another packet, avoiding copy-on-write faults in it.
-         */
-        xfree(buf);
-        buf = NULL;
     }
+}
+
+static noreturn void run_worker(struct tftphdr *tp, int n)
+{
+    int setrv;
+    int die;
 
     /* Child process: handle the actual request here */
     post_fork();
@@ -1117,6 +1142,13 @@ int main(int argc, char **argv)
        so depending on the automatic re-opening by syslog() is unsafe. */
     if (dopt.secure)
         tftpd_reopenlog();
+
+    /*
+     * Trim the part of the request packet not actually used. Most of the
+     * time the request packet is *much* smaller, so freeing this memory
+     * early helps memory reuse.
+     */
+    tp = xrealloc(tp, n);
 
     /* Close file descriptors we don't need */
     close_listen_set();
@@ -1207,14 +1239,8 @@ int main(int argc, char **argv)
 
     tftpd_config_socket(peer, true);
 
-    /* Packet receive buffer */
-    ackbuf = xmalloc(PKTSIZE);
-
-    tp = (struct tftphdr *)buf;
-    tp_opcode = ntohs(tp->th_opcode);
-    if (tp_opcode == RRQ || tp_opcode == WRQ)
-	tftp(tp, n);
-    exit(0);
+    tftp(tp, n);
+    abort();                    /* It should not be possible to get here */
 }
 
 static const char *rewrite_access(const struct formats *,
@@ -1227,34 +1253,28 @@ static void tftp_recvfile(const struct formats *, struct tftphdr *, int,
                           const char *);
 
 static const struct formats formats[] = {
-    {
-    "netascii", rewrite_access, validate_access, tftp_sendfile,
-            tftp_recvfile, true}, {
-    "octet", rewrite_access, validate_access, tftp_sendfile,
-            tftp_recvfile, false}, {
-    NULL, NULL, NULL, NULL, NULL, false}
+    { "netascii", rewrite_access, validate_access,
+      tftp_sendfile, tftp_recvfile, true},
+    { "octet", rewrite_access, validate_access,
+      tftp_sendfile, tftp_recvfile, false },
 };
 
 /*
  * Handle initial connection protocol.
  */
-static int tftp(struct tftphdr *tp, int size)
+static noreturn void tftp(struct tftphdr *tp, int size)
 {
     char *cp, *end;
     int argn, ecode;
     const struct formats *pf = NULL;
-    char *origfilename, *request_filename;
+    char *origfilename, *request_filename = NULL;
     const char *filename;
     char *mode = NULL;
     const char *errmsgptr;
     uint16_t tp_opcode = ntohs(tp->th_opcode);
-
     char *val = NULL, *opt = NULL;
-    char *ap = ackbuf + 2;
-
-    ((struct tftphdr *)ackbuf)->th_opcode = htons(OACK);
-    windowsize = 1;
-    requested_windowsize = 0;
+    struct tftphdr *oack;
+    size_t oacklen;
 
     origfilename = cp = (char *)&(tp->th_stuff);
     argn = 0;
@@ -1275,34 +1295,33 @@ static int tftp(struct tftphdr *tp, int size)
         if (argn == 1) {
             mode = ++cp;
         } else if (argn == 2) {
-            for (cp = mode; *cp; cp++)
-                *cp = tolower(*cp);
-            for (pf = formats; pf->f_mode; pf++) {
-                if (!strcmp(pf->f_mode, mode))
-                    break;
+            ARRAY_FOREACH(pf, formats) {
+                if (ascii_strcaseeq(pf->f_mode, mode))
+                    goto found_format;
             }
-            if (!pf->f_mode) {
-                nak(EBADOP, "Unknown mode");
-                exit(0);
-            }
+            nak(EBADOP, "Unknown mode");
+            exit(0);
+
+        found_format:
 	    file = NULL;
+            request_filename = xstrdup(origfilename);
             if (!(filename = (*pf->f_rewrite)
 		  (pf, origfilename, tp_opcode, from.sa.sa_family, &errmsgptr))) {
                 nak(EACCESS, errmsgptr);        /* File denied by mapping rule */
                 exit(0);
             }
             if (dopt.verbosity >= 1) {
-                if (filename == origfilename
-                    || !strcmp(filename, origfilename))
+                if (!strcmp(filename, origfilename)) {
                     tftpd_log(LOG_NOTICE, "%s from %s filename %s",
                               tp_opcode == WRQ ? "WRQ" : "RRQ",
                               from_str, filename);
-                else
+                } else {
                     tftpd_log(LOG_NOTICE,
                            "%s from %s filename %s remapped to %s",
                               tp_opcode == WRQ ? "WRQ" : "RRQ",
                               from_str, origfilename,
                               filename);
+                }
             }
 	    /*
 	     * If "file" is already set, then a file was already validated
@@ -1312,7 +1331,7 @@ static int tftp(struct tftphdr *tp, int size)
 		ecode =
 		    (*pf->f_validate) (filename, tp_opcode, pf, &errmsgptr);
 		if (ecode == ENOTFOUND)
-		    tftpd_log(LOG_NOTICE, "client %s: file not found: %s",
+		    tftpd_log(LOG_NOTICE, "%s: file not found: %s",
 			      from_str, filename);
 		if (ecode) {
 		    nak(ecode, errmsgptr);
@@ -1323,7 +1342,7 @@ static int tftp(struct tftphdr *tp, int size)
         } else if (argn & 1) {
             val = ++cp;
         } else {
-            do_opt(opt, val, &ap);
+            parse_option(opt, val);
             opt = ++cp;
         }
     }
@@ -1333,143 +1352,19 @@ static int tftp(struct tftphdr *tp, int size)
         exit(0);
     }
 
-    negotiate_windowsize(&ap);
+    oacklen = negotiate_options(&oack);
+
+    /* There are no more uses of the request packet after this point */
+    xfree(tp);
+
     tftp_set_socket_buffers(peer, segsize, windowsize, tp_opcode == RRQ);
-    request_filename = xstrdup(origfilename);
 
-    if (ap != (ackbuf + 2)) {
-        if (tp_opcode == WRQ)
-            (*pf->f_recv) (pf, (struct tftphdr *)ackbuf, ap - ackbuf,
-                           request_filename);
-        else
-            (*pf->f_send) (pf, (struct tftphdr *)ackbuf, ap - ackbuf,
-                           request_filename);
-    } else {
-        if (tp_opcode == WRQ)
-            (*pf->f_recv) (pf, NULL, 0, request_filename);
-        else
-            (*pf->f_send) (pf, NULL, 0, request_filename);
-    }
-    exit(0);                    /* Request completed */
-}
-
-static bool blksize_set;
-
-/*
- * Set a non-standard block size (c.f. RFC2348)
- */
-static bool set_blksize(uintmax_t *vp)
-{
-    uintmax_t sz = *vp;
-
-    if (blksize_set)
-        return false;
-
-    if (sz < 8)
-        return false;
-    else if (sz > xopt.max_blksize)
-        sz = xopt.max_blksize;
-
-    *vp = segsize = sz;
-    blksize_set = true;
-    return true;
-}
-
-/*
- * Set a power-of-two block size (nonstandard)
- */
-static bool set_blksize2(uintmax_t *vp)
-{
-    uintmax_t sz = *vp;
-
-    if (blksize_set)
-        return false;
-
-    if (sz < 8)
-        return false;
-    else if (sz > xopt.max_blksize)
-        sz = xopt.max_blksize;
+    if (tp_opcode == RRQ)
+        (*pf->f_send) (pf, oack, oacklen, request_filename);
     else
+        (*pf->f_recv) (pf, oack, oacklen, request_filename);
 
-    /* Convert to a power of two */
-    if (sz & (sz - 1)) {
-        unsigned int sz1 = 1;
-        /* Not a power of two - need to convert */
-        while (sz >>= 1)
-            sz1 <<= 1;
-        sz = sz1;
-    }
-
-    *vp = segsize = sz;
-    blksize_set = true;
-    return true;
-}
-
-/*
- * Set the block number rollover value
- */
-static bool set_rollover(uintmax_t *vp)
-{
-    uintmax_t ro = *vp;
-
-    if (ro > 65535)
-	return false;
-
-    rollover_val = (uint16_t)ro;
-    return true;
-}
-
-/*
- * Set the number of DATA packets sent before an ACK is expected
- * (RFC 7440).  Limit this to the same conservative value exposed by
- * the client.
- */
-#define OPTBUFSIZE	(sizeof(uintmax_t) * CHAR_BIT / 3 + 3)
-
-static bool set_windowsize(uintmax_t *vp)
-{
-    if (*vp < 1)
-        return false;
-
-    requested_windowsize = *vp;
-
-    return true;
-}
-
-/*
- * windowsize depends on the negotiated block size, which can appear in
- * either order in an RFC 2347 request.  Add it to the OACK only after all
- * request options have been processed.
- */
-static void negotiate_windowsize(char **ap)
-{
-    uintmax_t window;
-    char retbuf[OPTBUFSIZE];
-    size_t optlen, retlen;
-
-    if (!requested_windowsize)
-        return;
-
-    window = requested_windowsize;
-    if (window > xopt.max_windowsize)
-        window = xopt.max_windowsize;
-    if (dopt.max_windowbytes &&
-        window > dopt.max_windowbytes / (uintmax_t)segsize)
-        window = dopt.max_windowbytes / (uintmax_t)segsize;
-
-    if (window < 2)
-        return;
-
-    windowsize = (unsigned int)window;
-    optlen = sizeof("windowsize");
-    retlen = sprintf(retbuf, "%u", windowsize);
-    if (*ap + optlen + retlen >= ackbuf + PKTSIZE) {
-        nak(EOPTNEG, "Insufficient space for options");
-        exit(0);
-    }
-
-    *ap = mempcpy(*ap, "windowsize", optlen);
-    *ap = mempcpy(*ap, retbuf, retlen + 1);
+    exit(0);                    /* Request completed */
 }
 
 /*
@@ -1506,104 +1401,252 @@ static bool io_is_threaded(void)
 }
 
 /*
- * Return a file size (c.f. RFC2349)
- * For netascii mode, we don't know the size ahead of time;
- * so reject the option.
- */
-static bool set_tsize(uintmax_t *vp)
-{
-    uintmax_t sz = *vp;
-
-    if (!tsize_ok)
-        return false;
-
-    if (sz == 0)
-        sz = tsize;
-
-    *vp = sz;
-    return true;
-}
-
-/*
- * Set the timeout (c.f. RFC2349).  This is supposed
- * to be the (default) retransmission timeout, but being an
- * integer in seconds it seems a bit limited.
- */
-static bool set_timeout(uintmax_t *vp)
-{
-    uintmax_t to = *vp;
-
-    if (to < 1 || to > 255)
-        return false;
-
-    rexmtval = timeout = to * 1000000UL;
-    maxtimeout = rexmtval * TIMEOUT_LIMIT;
-
-    return true;
-}
-
-/* Similar, but in microseconds.  We allow down to 10 ms. */
-static bool set_utimeout(uintmax_t *vp)
-{
-    uintmax_t to = *vp;
-
-    if (to < 10000UL || to > 255000000UL)
-        return false;
-
-    rexmtval = timeout = to;
-    maxtimeout = rexmtval * TIMEOUT_LIMIT;
-
-    return true;
-}
-
-/*
- * Parse RFC2347 style options; we limit the arguments to positive
+ * Parse an RFC2347 option; we limit the arguments to positive
  * integers which matches all our current options.
  */
-static void do_opt(const char *opt, const char *val, char **ap)
+static void parse_option(const char *opt, const char *val)
 {
-    struct daemon_protocol_option *po;
-    char retbuf[OPTBUFSIZE];
-    char *p = *ap;
-    size_t optlen, retlen;
     char *vend;
     uintmax_t v;
+    struct daemon_protocol_option *po;
 
     /* Global option-parsing variables initialization */
-    blksize_set = false;
-
-    if (dopt.reject_all_options)
-        return;
-
     if (!*opt || !*val)
         return;
 
     errno = 0;
     v = strtoumax(val, &vend, 10);
     if (*vend || errno == ERANGE)
-	return;
+	return;                 /* Invalid string */
 
-    for (po = protocol_options; po->name; po++)
-        if (!strcasecmp(po->name, opt)) {
-            if (po->handler(&v)) {
-                if (!strcasecmp(opt, "windowsize"))
-                    break;
-
-		optlen = strlen(opt);
-		retlen = sprintf(retbuf, "%"PRIuMAX, v);
-
-                if (p + optlen + retlen + 2 >= ackbuf + PKTSIZE) {
-                    nak(EOPTNEG, "Insufficient space for options");
-                    exit(0);
-                }
-
-		p = mempcpy(p, opt, optlen+1);
-		p = mempcpy(p, retbuf, retlen+1);
-            }
+    ARRAY_FOREACH(po, protocol_options) {
+        if (ascii_strcaseeq(po->name, opt)) {
+            po->flags |= POF_REQ;
+            po->val = v;
+            /*
+             * Save the name in the same case as the client sent;
+             * it's not supposed to matter but broken TFTP clients abound.
+             */
+            po->client_name = opt;
             break;
         }
+    }
+}
 
-    *ap = p;
+/*
+ * Returns a pointer to the option structure if it was requested
+ * by the client and not configured to be refused.
+ */
+static inline struct daemon_protocol_option *
+opt_requested(enum protocol_option_enum opt)
+{
+    struct daemon_protocol_option *po = &protocol_options[opt];
+
+    if ((po->flags & (POF_REQ|POF_REFUSE)) == POF_REQ)
+        return po;
+    else
+        return NULL;
+}
+
+static inline bool opt_granted(const struct daemon_protocol_option *po)
+{
+    /* The options must have been both requested and acknowledgeable */
+    return (po->flags & (POF_ACK|POF_REQ|POF_REFUSE)) == (POF_ACK|POF_REQ);
+}
+
+/*
+ * Select the options to acknowledge; return true if at least one
+ * option should be acknowledged.
+ */
+static void negotiate_blksize(void)
+{
+    struct daemon_protocol_option *blk  = opt_requested(PO_BLKSIZE);
+    struct daemon_protocol_option *blk2 = opt_requested(PO_BLKSIZE2);
+    unsigned int blksize = 0;
+
+    if (blk2) {
+        if (blk2->val < MIN_SEGSIZE) {
+            blk2 = NULL;
+        } else {
+            unsigned int lb;
+
+            if (blk2->val > xopt.max_blksize)
+                blksize = xopt.max_blksize;
+            else
+                blksize = blk2->val;
+
+            /* Round down to a power of 2 */
+            while ((lb = blksize & (blksize - 1)))
+                blksize = lb;
+        }
+    }
+    if (blk) {
+        if (blk->val < MIN_SEGSIZE) {
+            blk = NULL;
+        } else {
+            if (blk->val > xopt.max_blksize) {
+                blksize = xopt.max_blksize;
+            } else if (blksize > blk->val) {
+                blk = NULL;		/* blksize2 wins, reject blksize */
+            } else {
+                blksize = blk->val;
+            }
+            if (blksize & (blksize - 1))
+                blk2 = NULL;	/* Reject blksize2, not power of 2 */
+        }
+    }
+    if (blk) {
+        blk->flags |= POF_ACK;
+        blk->val    = blksize;
+    }
+    if (blk2) {
+        blk2->flags |= POF_ACK;
+        blk2->val    = blksize;
+    }
+
+    segsize = blksize ? blksize : SEGSIZE;
+}
+
+static void negotiate_windowsize(void)
+{
+    struct daemon_protocol_option *ws = opt_requested(PO_WINDOWSIZE);
+    unsigned int window = 1;
+
+    if (ws && ws->val > 1) {
+        if (ws->val > xopt.max_windowsize)
+            window = xopt.max_windowsize;
+        else
+            window = ws->val;
+
+        if ((uintmax_t)window * segsize > dopt.max_windowbytes)
+            window = dopt.max_windowbytes / (uintmax_t)segsize;
+
+        if (window > 1) {
+            ws->flags |= POF_ACK;
+            ws->val    = window;
+        } else {
+            window = 1;
+        }
+    }
+
+    windowsize = window;
+}
+
+static void negotiate_tsize(void)
+{
+    struct daemon_protocol_option *ts = opt_requested(PO_TSIZE);
+
+    if (ts && tsize_ok) {
+        /* XXX: this really should be: is this an RRQ? */
+        if (!ts->val)
+            ts->val = tsize;
+        ts->flags |= POF_ACK;
+    }
+}
+
+#define MIN_TIMEOUT     (10000UL)
+#define MAX_TIMEOUT     (255UL * USEC_PER_SEC)
+#define MIN_TIMEOUT_SEC ((MIN_TIMEOUT + USEC_PER_SEC - 1)/USEC_PER_SEC)
+#define MAX_TIMEOUT_SEC (MAX_TIMEOUT / USEC_PER_SEC)
+
+static void negotiate_timeout(void)
+{
+    struct daemon_protocol_option *tos = opt_requested(PO_BLKSIZE);
+    struct daemon_protocol_option *tou = opt_requested(PO_BLKSIZE2);
+    unsigned long to = 0;
+    unsigned long tos_us = 0;
+
+    if (tos) {
+        if (tos->val < MIN_TIMEOUT_SEC || tos->val > MAX_TIMEOUT_SEC) {
+            tos = NULL;
+        } else {
+            to = tos_us = tos->val * USEC_PER_SEC;
+        }
+    }
+    if (tou) {
+        if (tou->val < MIN_TIMEOUT || tou->val > MAX_TIMEOUT) {
+            tou = NULL;
+        } else {
+            /*
+             * utimeout takes priority over timeout, ack
+             * timeout if and only if it is the same value as
+             * utimeout.
+             */
+            to = tou->val;
+            if (tos_us != to)
+                tos = NULL;
+        }
+    }
+    if (tos)
+        tos->flags |= POF_ACK;
+    if (tou)
+        tou->flags |= POF_ACK;
+}
+
+static void negotiate_rollover(void)
+{
+    struct daemon_protocol_option *ro = opt_requested(PO_ROLLOVER);
+
+    if (ro && ro->val <= 65535) {
+        rollover_val = ro->val;
+        ro->flags |= POF_ACK;
+    } else {
+        rollover_val = 0;
+    }
+}
+
+/*
+ * Build an OACK packet in a new buffer and return the size. If there
+ * are NO options agreed upon, then return 0 and do not allocate a
+ * buffer.
+ */
+static size_t build_oack(struct tftphdr **tpp)
+{
+    const struct daemon_protocol_option *po;
+    struct tftphdr *tp;
+    char *p;
+    size_t bufsize = 0;
+
+    ARRAY_FOREACH(po, protocol_options) {
+        if (opt_granted(po))
+            bufsize += po->nsize + DIGIT_SPACE(po->val) + 1;
+    }
+
+    if (!bufsize) {
+        /* No granted options, no OACK phase */
+        *tpp = NULL;
+        return 0;
+    }
+
+    *tpp = tp = xmalloc(bufsize + 2);
+    tp->th_opcode = htons(OACK);
+    p = tp->th_stuff;
+
+    ARRAY_FOREACH(po, protocol_options) {
+        if (opt_granted(po)) {
+            p = mempcpy(p, po->client_name, po->nsize);
+            p += snprintf(p, DIGIT_SPACE(po->val)+1, "%"PRIuMAX, po->val);
+            p++;
+        }
+    }
+
+    return p - (char *)tp;
+}
+
+static size_t negotiate_options(struct tftphdr **tpp)
+{
+    if (dopt.reject_all_options) {
+        *tpp = NULL;
+        return 0;
+    }
+
+    negotiate_blksize();
+    negotiate_windowsize();
+    negotiate_tsize();
+    negotiate_timeout();
+    negotiate_rollover();
+
+    return build_oack(tpp);
 }
 
 /*
@@ -1951,7 +1994,7 @@ static int validate_access(const char *filename, int mode,
 static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
                           int oacklen, const char *filename)
 {
-    struct tftphdr *ap;         /* ack packet */
+    struct tftphdr ack;         /* ack packet */
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     int n;
@@ -1963,34 +2006,39 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
     if (oap) {
         timeout = rexmtval;
         (void)sigsetjmp(timeoutbuf, 1);
-      oack:
+    send_oack:
         r_timeout = timeout;
         if (send(peer, oap, oacklen, 0) != oacklen) {
             tftpd_log(LOG_WARNING, "tftpd: oack: %s\n", strerror(errno));
             goto out;
         }
         for (;;) {
-            n = recv_time(peer, ackbuf, PKTSIZE, 0, &r_timeout);
+            n = recv_time(peer, &ack, sizeof ack, 0, &r_timeout);
             if (n < 0) {
                 tftpd_log(LOG_WARNING, "tftpd: read: %s", strerror(errno));
                 goto out;
             }
-            ap = (struct tftphdr *)ackbuf;
-            ap_opcode = ntohs((uint16_t) ap->th_opcode);
-            ap_block = ntohs((uint16_t) ap->th_block);
+
+            if (n < 2)
+                continue;
+
+            ap_opcode = ntohs(ack.th_opcode);
+            ap_block  = ntohs(ack.th_block);
 
             if (ap_opcode == ERROR) {
                 tftpd_log(LOG_WARNING,
-                       "tftp: client does not accept options\n");
+                          "%s: client rejected negotiated options", from_str);
                 goto out;
-            }
-            if (ap_opcode == ACK) {
+            } else if (n >= 4 && ap_opcode == ACK) {
                 if (ap_block == 0)
                     break;
-                goto oack;
+                else
+                    goto send_oack;
             }
         }
     }
+
+    xfree(oap);
 
     io = tftp_io_reader_start(file, pf->f_convert, windowsize,
                               io_ring_slots(), segsize, io_is_threaded());
@@ -2002,9 +2050,9 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
-    xfer.resend_oack = true;
-    xfer.control = ackbuf;
-    xfer.control_size = PKTSIZE;
+    xfer.resend_oack = false;
+    xfer.control = &ack;
+    xfer.control_size = sizeof ack;
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = io;
@@ -2047,19 +2095,20 @@ static void tftp_recvfile(const struct formats *pf,
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;
     struct tftp_xfer_result result;
-    struct tftphdr *ap;
-    const struct tftphdr *initial_reply;
+    struct tftphdr *initial_reply;
     int initial_reply_len;
     struct tftp_io * volatile io = NULL;
+    struct tftphdr *datapkt;
+    size_t datapktsize;
 
-    ap = (struct tftphdr *)ackbuf;
     if (oack) {
         initial_reply = oack;
         initial_reply_len = oacklen;
     } else {
-        ap->th_opcode = htons((uint16_t)ACK);
-        ap->th_block = 0;
-        initial_reply = ap;
+        /* No OACK */
+        initial_reply = xmalloc(4);
+        initial_reply->th_opcode = htons(ACK);
+        initial_reply->th_block = 0;
         initial_reply_len = 4;
     }
 
@@ -2074,15 +2123,20 @@ static void tftp_recvfile(const struct formats *pf,
     xfer.windowsize = windowsize;
     xfer.rollover = rollover_val;
     xfer.resend_oack = false;
-    xfer.control = ackbuf;
-    xfer.control_size = PKTSIZE;
+    xfer.control = NULL;
+    xfer.control_size = 0;
     xfer.context = &context;
     xfer.ops = &daemon_xfer_ops;
     xfer.io_context = io;
     xfer.io_ops = &tftp_io_xfer_ops;
-    tftp_xfer_recv(&xfer, ap, (struct tftphdr *)buf, PKTSIZE,
-                   initial_reply,
-                   initial_reply_len, NULL, 0, &result);
+
+    datapktsize = xfer.blocksize + 4;
+    datapkt = xmalloc(datapktsize);
+
+    tftp_xfer_recv(&xfer, datapkt, datapktsize,
+                   &initial_reply, initial_reply_len, NULL, 0, &result);
+
+    xfree(datapkt);
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
@@ -2123,20 +2177,6 @@ static void tftp_recvfile(const struct formats *pf,
     return;
 }
 
-static const char *const errmsgs[] = {
-    "Undefined error code",     /* 0 - EUNDEF */
-    "File not found",           /* 1 - ENOTFOUND */
-    "Access denied",            /* 2 - EACCESS */
-    "Disk full or allocation exceeded", /* 3 - ENOSPACE */
-    "Illegal TFTP operation",   /* 4 - EBADOP */
-    "Unknown transfer ID",      /* 5 - EBADID */
-    "File already exists",      /* 6 - EEXISTS */
-    "No such user",             /* 7 - ENOUSER */
-    "Failure to negotiate RFC2347 options"      /* 8 - EOPTNEG */
-};
-
-#define ERR_CNT (sizeof(errmsgs)/sizeof(const char *))
-
 /*
  * Send a nak packet (error message).
  * Error code passed in is one of the
@@ -2148,6 +2188,11 @@ static void nak(int error, const char *msg)
     struct tftphdr *tp;
     int length;
 
+    msg = error_msg(error);
+    length = strlen(msg) + 1;
+    tp = xmalloc(length + 4);
+
+    /* Convert negative errno to TFTP error codes */
     switch (error) {
     case -ENOENT:
     case -ENOTDIR:
@@ -2161,33 +2206,24 @@ static void nak(int error, const char *msg)
         error = EEXISTS;
         break;
     default:
+        if (error < 0 || !*msg)
+            error = EUNDEF;
         break;
     }
 
-    if ((unsigned)error >= ERR_CNT) {
-            error = EUNDEF;
-            if (!msg && error < 0)
-                msg = strerror(-error);
-    } else if (!msg) {
-        msg = errmsgs[error];
-    }
-
-    if (!msg)
-        msg = "Request failed";
-
-    tp = (struct tftphdr *)buf;
-    tp->th_opcode = htons((uint16_t) ERROR);
-    tp->th_code   = htons((uint16_t) error);
-
-    length = strlen(msg) + 1;
+    tp->th_opcode = htons(ERROR);
+    tp->th_code   = htons(error);
     memcpy(tp->th_msg, msg, length);
     length += 4;                /* Add space for header */
 
     if (dopt.verbosity >= 2) {
-        tftpd_log(LOG_INFO, "%s: sending NAK (%d, %s)",
+        tftpd_log(LOG_INFO, "%s: sending ERROR %d: %s)",
                   from_str, error, tp->th_msg);
     }
 
-    if (send(peer, buf, length, 0) != length)
-        tftpd_log(LOG_WARNING, "%s: nak: %s", from_str, strerror(errno));
+    if (send(peer, tp, length, 0) != length)
+        tftpd_log(LOG_WARNING, "%s: sending ERROR failed: %s",
+                  from_str, strerror(errno));
+
+    xfree(tp);
 }
