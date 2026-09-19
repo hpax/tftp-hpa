@@ -24,7 +24,7 @@ const char * const errmsgs[ETYPE_CNT] = {
     "file not found",                   /* 1 - ENOTFOUND */
     "access denied",                    /* 2 - EACCESS */
     "insufficient space for upload",    /* 3 - ENOSPACE */
-    "illegal TFTP operation",           /* 4 - EBADOP */
+    "invalid TFTP operation",           /* 4 - EBADOP */
     "unknown transfer ID",              /* 5 - EBADID */
     "file already exists",              /* 6 - EEXISTS */
     "no such user",                     /* 7 - ENOUSER */
