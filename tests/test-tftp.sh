@@ -110,7 +110,7 @@ start_server() {
 	TFTPD_CMD+=(strace -o "$STRACE_LOG" -f)
     fi
 
-    TFTPD_CMD+=("$TFTPD" --stderr -vv -L -p --port-range $PORTRANGE)
+    TFTPD_CMD+=("$TFTPD" --stderr -vv --mtu -L -p --port-range $PORTRANGE)
     if [ $ANYADDR -ne 0 ]; then
 	if [ $PORT -ne 69 ]; then
 	    TFTPD_CMD+=(-a :$PORT)

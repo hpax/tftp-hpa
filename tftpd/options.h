@@ -33,7 +33,7 @@ struct daemon_options {
     bool standalone;
     bool nodaemon;
     bool systemd;
-    bool rooted;
+    bool mtu;
     bool reject_all_options;
     bool spec_umask;
     bool use_stderr;
@@ -41,6 +41,7 @@ struct daemon_options {
     unsigned long rexmtval;
     int verbosity;
     int map_steps;
+    int mtu_adj;
     intmax_t waittime;
     mode_t my_umask;
     const char *service;

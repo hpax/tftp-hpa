@@ -381,14 +381,20 @@ around broken clients.
 Disable all RFC 2347 options.  Requests containing options proceed
 directly to the normal TFTP data stage without an option acknowledgment.
 .TP
-\fB\-B\fP, \fB\-\-blocksize\fP \fImax-block-size\fP
+\fB\-B\fP, \fB\-\-blocksize\fP {\fImax-block-size\fP|\fBmtu\fP[-\fIslack\fP]}
 Specifies the maximum permitted block size.  The permitted range for
-this parameter is from 512 to 65464.  Some embedded clients request
-large block sizes and yet do not handle fragmented packets correctly;
-for these clients, it is recommended to set this value to the smallest
-MTU on your network minus 32 bytes (20 bytes for IP, 8 for UDP, and 4
-for TFTP; less if you use IP options on your network.)  For example,
-on a standard Ethernet (MTU 1500) a value of 1468 is reasonable.
+this parameter is from 512 to 65464 or
+
+.RB \\[lq] mtu \\[rq]
+with an optional \fIslack\fP adjustment factor. In the latter case,
+.B tftpd
+will try to query the maximum transmission unit (MTU) from the kernel
+and size the blksize accordingly.
+.PP
+Some embedded clients request large block sizes and yet do not handle
+fragmented packets correctly; for that reason
+\fB\-\-blocksize mtu\fP
+is recommended if you might have these kinds of clients on your network.
 .TP
 \fB\-W\fP, \fB\-\-windowsize\fP \fImax-window-size\fP
 Specifies the maximum accepted RFC 7440 \fBwindowsize\fP option value.

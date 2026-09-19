@@ -174,9 +174,13 @@ int tftp_recv_time(int, void *, int, unsigned int, struct sockaddr *,
 const char *net_family(sa_family_t);
 char *net_address(const struct sockaddr *, socklen_t);
 
+unsigned int tftp_mtu_blksize(int fd, const union sock_addr *sa, int adjust);
+
 /*
- * Wrapper for setsockopt() for the case where the option is an int.
+ * Wrappers for get/setsockopt() for the case where the option is an int.
  */
+int getsockint(int sockfd, int level, int optname);
+
 static inline int setsockint(int sockfd, int level, int optname,
                              const int optval)
 {
@@ -212,6 +216,7 @@ static inline unsigned char ascii_tolower(unsigned char c)
 }
 
 bool ascii_strcaseeq(const char *s1, const char *s2);
+bool ascii_strncaseeq(const char *s1, const char *s2, size_t n);
 
 /*
  * A conservative estimate of the maximum number of decimal digits

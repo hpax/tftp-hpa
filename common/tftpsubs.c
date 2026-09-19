@@ -69,6 +69,63 @@ static int set_socket_nonblock(int fd, bool flag)
 #endif
 
 /*
+ * Try to get the MTU of a connected socket, adjusted to account
+ * for TFTP overhead.
+ */
+unsigned int tftp_mtu_blksize(int fd, const union sock_addr *sa, int adjust)
+{
+    int mtu;
+
+    errno = 0;
+
+    switch (sa->sa.sa_family) {
+    case AF_INET:
+        adjust -= 20 + 8 + 4;
+#ifdef IP_MTU
+        mtu = getsockint(fd, IPPROTO_IP, IP_MTU);
+#endif
+        break;
+#ifdef HAVE_IPV6
+    case AF_INET6:
+        adjust -= 40 + 8 + 4;
+#ifdef IPV6_MTU
+        mtu = getsockint(fd, IPPROTO_IPV6, IPV6_MTU);
+#endif
+        break;
+#endif
+    default:                    /* What is this?! */
+        return MAX_SEGSIZE;
+    }
+
+    if (errno || mtu < 0)
+        mtu = 1500;             /* Default to an Ethernet MTU */
+
+    mtu += adjust;
+
+    if (mtu < SEGSIZE)
+        mtu = SEGSIZE;
+    else if (mtu > MAX_SEGSIZE)
+        mtu = MAX_SEGSIZE;
+
+    return mtu;
+}
+
+/*
+ * Wrappers for getsockopt() for the case where the option is an int.
+ */
+int getsockint(int sockfd, int level, int optname)
+{
+    int val = -1;
+    socklen_t optlen = sizeof val;
+
+    if (getsockopt(sockfd, level, optname, &val, &optlen) ||
+        (size_t)optlen != sizeof val)
+        return -1;
+
+    return val;
+}
+
+/*
  * Receive a packet with a synchronous timeout.  The remaining timeout is
  * updated after interrupted polls and discarded packets so a receive attempt
  * cannot extend its deadline.
@@ -308,11 +365,11 @@ int get_nullfd(void)
 /*
  * Similar to strcasecmp() but only for ASCII, and returns true on match
  */
-bool ascii_strcaseeq(const char *s1, const char *s2)
+bool ascii_strncaseeq(const char *s1, const char *s2, size_t n)
 {
     unsigned char c1, cx;
 
-    do {
+    while (n--) {
         c1 = *s1++;
         cx = c1 ^ *s2++;
 
@@ -322,7 +379,15 @@ bool ascii_strcaseeq(const char *s1, const char *s2)
             if ((unsigned char)((c1 | cx) - 'a') > (unsigned char)('z' - 'a'))
                 return false;
         }
-    } while (c1);
+
+        if (!c1)
+            return true;
+    }
 
     return true;
+}
+
+bool ascii_strcaseeq(const char *s1, const char *s2)
+{
+    return ascii_strncaseeq(s1, s2, SIZE_MAX);
 }

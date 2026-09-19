@@ -1,3 +1,10 @@
+Changes in 7.1:
+	The --blocksize (-B) option to the server can now be specified
+	as "mtu" or "mtu-nnn" where nnn is a number of additional
+	bytes to reserve; this bases the maximum block size on the MTU
+	as obtained from the kernel (if possible.)
+
+
 Changes in 7.0:
 	The memory footprint of the server has been optimized,
 	reducing the burden of serving many clients.

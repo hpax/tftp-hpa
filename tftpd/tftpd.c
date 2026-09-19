@@ -2,9 +2,8 @@
  * SPDX-License-Identifier: BSD-4-Clause-UC
  *
  * Copyright (c) 1983 Regents of the University of California.
- * Copyright (c) 1999-2009 H. Peter Anvin
+ * Copyright (c) 1999-2009, 2026 H. Peter Anvin
  * Copyright (c) 2011-2014 Intel Corporation; author: H. Peter Anvin
- * Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
  * All rights reserved.
  */
 
@@ -464,7 +463,8 @@ enum long_only_options {
     OPT_WINDOW_BYTES,
     OPT_REJECT_ALL,
     OPT_PATH_PREFIX,
-    OPT_NORMALIZE
+    OPT_NORMALIZE,
+    OPT_MTU
 };
 
 static const struct option long_options[] = {
@@ -620,12 +620,35 @@ int main(int argc, char **argv)
         case 'B':
             {
                 char *vp;
-                xopt.max_blksize = (unsigned int)strtoul(optarg, &vp, 10);
-                if (xopt.max_blksize < 512 ||
-                    xopt.max_blksize > MAX_SEGSIZE || *vp) {
+                bool err = true;
+                unsigned long v;
+
+                if (ascii_strncaseeq(optarg, "mtu", 3)) {
+                    dopt.mtu = true;
+                    switch (optarg[3]) {
+                    case '\0':
+                        dopt.mtu_adj = 0;
+                        err = false;
+                        break;
+                    case '-':
+                        v = strtoul(optarg+4, &vp, 10);
+                        err = *vp || (v > INT_MAX/2);
+                        dopt.mtu_adj = -v;
+                        break;
+                    default:
+                        err = true;
+                    }
+                } else if (*optarg) {
+                    xopt.max_blksize = strtoul(optarg, &vp, 10);
+                    if (xopt.max_blksize >= SEGSIZE &&
+                        xopt.max_blksize <= MAX_SEGSIZE &&
+                        !*vp)
+                        err = false;
+                }
+
+                if (err) {
                     tftpd_log(LOG_ERR,
-                           "Bad maximum blocksize value (range 512-%d): %s",
-                           MAX_SEGSIZE, optarg);
+                              "Bad maximum blocksize value: %s", optarg);
                     exit(EX_USAGE);
                 }
             }
@@ -1470,6 +1493,13 @@ static void negotiate_blksize(void)
     struct daemon_protocol_option *blk  = opt_requested(PO_BLKSIZE);
     struct daemon_protocol_option *blk2 = opt_requested(PO_BLKSIZE2);
     unsigned int blksize = 0;
+    unsigned int max_blksize = xopt.max_blksize;
+
+    if (dopt.mtu) {
+        unsigned int mtu = tftp_mtu_blksize(peer, &from, dopt.mtu_adj);
+        if (mtu < max_blksize)
+            max_blksize = mtu;
+    }
 
     if (blk2) {
         if (blk2->val < MIN_SEGSIZE) {
@@ -1477,8 +1507,8 @@ static void negotiate_blksize(void)
         } else {
             unsigned int lb;
 
-            if (blk2->val > xopt.max_blksize)
-                blksize = xopt.max_blksize;
+            if (blk2->val > max_blksize)
+                blksize = max_blksize;
             else
                 blksize = blk2->val;
 
@@ -1491,27 +1521,35 @@ static void negotiate_blksize(void)
         if (blk->val < MIN_SEGSIZE) {
             blk = NULL;
         } else {
-            if (blk->val > xopt.max_blksize) {
-                blksize = xopt.max_blksize;
+            if (blk->val > max_blksize) {
+                blksize = max_blksize;
             } else if (blksize > blk->val) {
                 blk = NULL;		/* blksize2 wins, reject blksize */
             } else {
                 blksize = blk->val;
             }
-            if (blksize & (blksize - 1))
-                blk2 = NULL;	/* Reject blksize2, not power of 2 */
         }
     }
+
+    if (!blksize)
+        blk = blk2 = NULL;
+
     if (blk) {
         blk->flags |= POF_ACK;
         blk->val    = blksize;
     }
-    if (blk2) {
+
+    if (blksize & (blksize - 1)) {
+        blk2 = NULL;            /* Not a power of 2 */
+    } else if (blk2) {
         blk2->flags |= POF_ACK;
         blk2->val    = blksize;
     }
 
-    segsize = blksize ? blksize : SEGSIZE;
+    if (!blk && !blk2)
+        blksize = SEGSIZE;      /* No blksize option successfully negotiated */
+
+    segsize = blksize;
 }
 
 static void negotiate_windowsize(void)
