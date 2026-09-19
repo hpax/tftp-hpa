@@ -334,8 +334,9 @@ static void usage(int errcode)
             "    -B, --blocksize size       set the requested transfer block size\n"
             "    -W, --windowsize size      set the requested transfer window size\n"
             "    -T, --no-tsize             disable sending the tsize TFTP option\n"
-            "    -c, --command command      execute \"command\", then exit (must be last)\n",
-            _progname);
+            "    -c, --command command      execute \"command\", then exit (must be last)\n"
+            "    -c, --command help         get a list of available commands\n"
+            ,  _progname);
 
     exit(errcode);
 }
