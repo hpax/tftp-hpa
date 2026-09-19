@@ -127,15 +127,14 @@ static const struct tftp_xfer_ops client_xfer_ops = {
  */
 #define OPT_SPACE(x) (sizeof(x) + DIGIT_SPACE(uintmax_t) + 1)
 
-#define TFTP_OACK_MAX_PACKET_SIZE                       \
-    (3 + OPT_SPACE("blksize") + OPT_SPACE("windowsize"))
+#define TFTP_OPTION_SPACE (OPT_SPACE("blksize") + OPT_SPACE("windowsize"))
 
 /*
  * The maximum size of a reply packet (ACK, ERROR, OACK or
  * default-sized DATA), that we care about. If an ERROR packet is
  * unreasonably long, just truncate it.
  */
-#define TFTP_REPLY_MAX_PACKET_SIZE MAX(TFTP_OACK_MAX_PACKET_SIZE, SEGSIZE+4)
+#define TFTP_REPLY_MAX_PACKET_SIZE MAX(TFTP_OPTION_SPACE+2, SEGSIZE+4)
 
 /*
  * Send the requested file.
@@ -488,7 +487,7 @@ makerequest(struct tftphdr **pkt,
 {
     struct tftphdr *tp;
     char *cp;
-    char optionbuf[TFTP_OACK_MAX_PACKET_SIZE];
+    char optionbuf[TFTP_OPTION_SPACE];
     size_t namelen, modelen, optionlen;
     size_t pktsize;
 
