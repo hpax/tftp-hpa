@@ -1,4 +1,7 @@
-Changes in 6.2:
+Changes in 7.0:
+	The memory footprint of the server has been optimized,
+	reducing the burden of serving many clients.
+
 	The client adds mget and mput commands for unambiguous multi-file
 	transfers to or from a specified directory.  Command help and
 	selection have also been reorganized for clearer interactive use.
@@ -26,6 +29,9 @@ Changes in 6.2:
 	includes the process ID.  Improve listener behavior for IPv6-only
 	sockets and ensure invalid path requests do not leak file
 	descriptors.
+
+	The client now sends the tsize option (if possible) unless
+	explicitly disabled by the user.
 
 
 Changes in 6.1:
