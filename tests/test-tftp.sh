@@ -3,16 +3,16 @@
 # TFTP Client-Server Test Script
 # Tests bidirectional file transfer with an ephemeral TFTP server
 #
-# Usage: ./test-tftp.sh [tftpd_path] [tftp_path] [port] [portrange]
+# Usage: ./test-tftp.sh
 #
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-TFTPD="${1:-$REPO_ROOT/tftpd/tftpd}"
-TFTP="${2:-${REPO_ROOT}/tftp/tftp}"
-PORT="${3:-6969}"
-PORTRANGE="${4:-60969:60999}"
+TFTPD="${TFTPD:-$REPO_ROOT/tftpd/tftpd}"
+TFTP="${TFTP:-${REPO_ROOT}/tftp/tftp}"
+PORT="${PORT:-6969}"
+PORTRANGE="${PORTRANGE:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
 ANYADDR="${ANYADDR:-0}"
 TESTROOT=$(mktemp -d)
@@ -339,9 +339,6 @@ main() {
 		for testfile in "${testfiles[@]}"; do
 		    test_download $testfile || return $?
 		done
-
-		# Clear server directory of downloaded test files
-		rm -f "$SERVER_DIR"/*
 
 		print_info "Running upload tests..."
 
