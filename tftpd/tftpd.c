@@ -125,8 +125,8 @@ static char *normalize_path(char *name);
 
 static FILE *file;
 
-static noreturn void run_worker(struct tftphdr *tp, int n);
-static noreturn void tftp(struct tftphdr *tp, int n);
+noreturn static void run_worker(struct tftphdr *tp, int n);
+noreturn static void tftp(struct tftphdr *tp, int n);
 
 static void nak(int, const char *);
 static void timer(int);
@@ -1115,7 +1115,7 @@ int main(int argc, char **argv)
     }
 }
 
-static noreturn void run_worker(struct tftphdr *tp, int n)
+noreturn static void run_worker(struct tftphdr *tp, int n)
 {
     int setrv;
     int die;
@@ -1254,7 +1254,7 @@ static const struct formats formats[] = {
 /*
  * Handle initial connection protocol.
  */
-static noreturn void tftp(struct tftphdr *tp, int size)
+noreturn static void tftp(struct tftphdr *tp, int size)
 {
     char *cp, *end;
     int argn, ecode;
@@ -1813,11 +1813,11 @@ static void rewrite_test(FILE *tf)
         { "dummy", NULL, test_validate_fail, NULL, NULL, false };
 #ifdef HAVE_IPV6
     /* Dummy addresses from netblocks assigned for documentation */
-    static const char phony_ip6_addr[16] =
+    static const uint8_t phony_ip6_addr[16] =
         { 0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
           0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef };
 #endif
-    static const char phony_ip4_addr[4] = { 192, 0, 2, 34 };
+    static const uint8_t phony_ip4_addr[4] = { 192, 0, 2, 34 };
     char *line = xmalloc(MAX_SEGSIZE + 1);
     int mode = dopt.cancreate ? WRQ : RRQ;
     sa_family_t af = xopt.ai_fam;

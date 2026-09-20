@@ -37,19 +37,18 @@ enum tftp_error {
 };
 
 struct tftphdr {
-    uint16_t th_opcode;
-    union {
-        char th_stuff[];
-        struct {
-            uint16_t th_block;
-            char th_data[];
-        };
-        struct {
-            uint16_t th_code;
-            char th_msg[];
-        };
-    };
+    uint16_t      th_opcode;
+    union tftphdr_altfmt {
+        uint16_t  thdr_block;
+        char      thdr_stuff[2];
+    } thdr_second;
+    char          th_data[];
 };
+
+#define th_block  thdr_second.thdr_block
+#define th_code   th_block
+#define th_stuff  thdr_second.thdr_stuff
+#define th_msg    th_data
 
 /* Range of possible block sizes (see RFC 1350 and RFC 2348) */
 

@@ -133,16 +133,6 @@
 #endif
 #endif
 
-#ifdef HAVE_STDNORETURN_H
-#include <stdnoreturn.h>
-#elif defined(noreturn)
-/* Already defined */
-#elif defined(__GNUC__)
-#define noreturn __attribute__((__noreturn__))
-#else
-#define noreturn
-#endif
-
 /* Test for EAGAIN/EWOULDBLOCK */
 #ifdef EAGAIN
 #if defined(EWOULDBLOCK) && (EWOULDBLOCK != EAGAIN)

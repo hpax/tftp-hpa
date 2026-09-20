@@ -1,9 +1,8 @@
 dnl SPDX-License-Identifier: BSD-3-Clause
 dnl
-dnl Copyright (c) 1999-2008, 2026 H. Peter Anvin
 dnl Copyright (c) 2008 Karsten Keil
 dnl Copyright (c) 2011-2026 Intel Corporation; Author: H. Peter Anvin
-dnl Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
+dnl Copyright (C) 1999-2008, 2026 H. Peter Anvin <hpa@zytor.com>
 dnl
 dnl Process this file with autoconf 2.71 or later to produce
 dnl a configure script.
@@ -23,49 +22,19 @@ PA_PROG_CC
 AC_USE_SYSTEM_EXTENSIONS
 
 dnl C99 is the minimum supported C language and library version.
-AC_MSG_CHECKING([for C99 compiler and library support])
-AC_LINK_IFELSE([AC_LANG_SOURCE([
-#include <stdbool.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <stdlib.h>
-
-struct c99_flex_array {
-        int value;
-        char flex@<:@@:>@;
-};
-
-static inline bool
-c99_supported(const uint16_t values@<:@static 1@:>@, uintmax_t *restrict result)
-{
-        *result = strtoumax("0", NULL, 10);
-        return values@<:@0@:>@ == 0;
-}
-
-int
-main(void)
-{
-        uint16_t values@<:@@:>@ = { @<:@0@:>@ = 0 };
-        uintmax_t result;
-
-        return !c99_supported(values, &result);
-}
-])],
-[AC_MSG_RESULT([yes])],
-[AC_MSG_FAILURE([a C99 compiler and library are required])])
+PA_C_C99_CHECK
 
 dnl Options for debugging and profiling
 PA_OPTION_DEBUG
 PA_OPTION_PROFILING
 
-dnl LLVM doesn't error out on invalid -W options unless this option is
-dnl specified first.  Enable this so this script can actually discover
-dnl which -W options are possible for this compiler.
-PA_ADD_CFLAGS([-Werror=unknown-warning-option])
-
 dnl Force gcc and gcc-compatible compilers treat signed integers
 dnl as 2's complement
 PA_ADD_CFLAGS([-fwrapv])
+
+dnl Force gcc and gcc-compatible compilers to not try to optimize
+dnl around type punning, which is very common in this code.
+PA_ADD_CFLAGS(-fno-strict-aliasing)
 
 dnl Force clang to behave in a predictable manner, in order to make bugs
 dnl possible to track down. gcc appears to have this behavior by default.
@@ -83,6 +52,9 @@ PA_ADD_CFLAGS([-fno-common])
 dnl Tests which may trigger warnings on some compilers
 AC_C_CONST
 
+dnl Check now to declare noreturn functions
+PA_C_NORETURN
+
 dnl Checks for header files.
 AC_CHECK_INCLUDES_DEFAULT
 
@@ -97,7 +69,6 @@ AC_CHECK_HEADERS_ONCE(locale.h)
 AC_CHECK_HEADERS_ONCE(paths.h)
 AC_CHECK_HEADERS_ONCE(poll.h)
 AC_CHECK_HEADERS_ONCE(setjmp.h)
-AC_CHECK_HEADERS_ONCE(stdnoreturn.h)
 AC_CHECK_HEADERS_ONCE(strings.h)
 AC_CHECK_HEADERS_ONCE(sysexits.h)
 AC_CHECK_HEADERS_ONCE(unistd.h)
@@ -303,7 +274,6 @@ LIBS="$common_libs"
 dnl
 dnl   Check for IPV6 and disable-ipv6
 dnl
-
 AC_CHECK_MEMBERS(struct sockaddr_in6.sin6_addr)
 AC_MSG_CHECKING([for IPv6 support])
 PA_ARG_DISABLED([ipv6],
@@ -341,25 +311,45 @@ PA_OPTION_LTO
 PA_OPTION_GC
 PA_OPTION_SANITIZER
 
+dnl Turn on compiler warnings
+
+dnl LLVM doesn't error out on invalid -W options unless this option is
+dnl specified first.  Enable this so this script can actually discover
+dnl which -W options are possible for this compiler.
+PA_ADD_CFLAGS([-Werror=unknown-warning-option])
+
 PA_ARG_ENABLED([werror],
  [compile with -Werror to error out on any warning],
  [PA_ADD_CFLAGS([-Werror])])
 
 PA_ADD_CFLAGS(-W)
 PA_ADD_CFLAGS(-Wall)
-PA_ADD_CFLAGS(-Wpointer-arith)
+PA_ADD_CFLAGS(-Wpedantic)
+
 PA_ADD_CFLAGS(-Wbad-function-cast)
+PA_ADD_CFLAGS(-Wc99-c11-compat)
+PA_ADD_CFLAGS(-Wc11-c23-compat,,,[PA_ADD_CFLAGS([-Wc11-c2x-compat])])
+PA_ADD_CFLAGS(-Wc23-c2y-compat)
 PA_ADD_CFLAGS(-Wcast-equal)
-PA_ADD_CFLAGS(-Wstrict-prototypes)
-PA_ADD_CFLAGS(-Wmissing-prototypes)
-PA_ADD_CFLAGS(-Wmissing-declarations)
-PA_ADD_CFLAGS(-Wnested-externs)
+PA_ADD_CFLAGS(-Wflex-array-member-not-at-end)
+PA_ADD_CFLAGS(-Wframe-larger-than=768)
+PA_ADD_CFLAGS(-Wheader-guard)
 PA_ADD_CFLAGS(-Winline)
-PA_ADD_CFLAGS(-Wwrite-strings)
-PA_ADD_CFLAGS(-Wundef)
+PA_ADD_CFLAGS(-Wjump-misses-init)
+PA_ADD_CFLAGS(-Wlogical-op)
+PA_ADD_CFLAGS(-Wmissing-declarations)
+PA_ADD_CFLAGS(-Wmissing-prototypes)
+PA_ADD_CFLAGS(-Wnested-externs)
+PA_ADD_CFLAGS(-Wpedantic-ms-format,-Wno-pedantic-ms-format)
+PA_ADD_CFLAGS(-Wpointer-arith)
 PA_ADD_CFLAGS(-Wshadow)
-PA_ADD_CFLAGS(-Wsign-compare)
-PA_ADD_CFLAGS(-fno-strict-aliasing)
+PA_ADD_CFLAGS(-Wstack-usage=16384)
+PA_ADD_CFLAGS(-Wstrict-prototypes)
+PA_ADD_CFLAGS(-Wtrigraphs)
+PA_ADD_CFLAGS(-Wtrivial-auto-var-init)
+PA_ADD_CFLAGS(-Wundef)
+PA_ADD_CFLAGS(-Wvla)
+PA_ADD_CFLAGS(-Wwrite-strings)
 
 dnl
 dnl Test compiler features. On some compilers, this can be affected
