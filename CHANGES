@@ -1,4 +1,7 @@
 Changes in 7.1:
+	A C99 compiler and standard library are now required to build
+	tftp-hpa.
+
 	The --blocksize (-B) option to the server can now be specified
 	as "mtu" or "mtu-nnn" where nnn is a number of additional
 	bytes to reserve; this bases the maximum block size on the MTU

@@ -39,14 +39,14 @@ enum tftp_error {
 struct tftphdr {
     uint16_t th_opcode;
     union {
-        char th_stuff[FLEX];
+        char th_stuff[];
         struct {
             uint16_t th_block;
-            char th_data[FLEX];
+            char th_data[];
         };
         struct {
             uint16_t th_code;
-            char th_msg[FLEX];
+            char th_msg[];
         };
     };
 };

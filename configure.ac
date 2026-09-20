@@ -3,6 +3,7 @@ dnl
 dnl Copyright (c) 1999-2008, 2026 H. Peter Anvin
 dnl Copyright (c) 2008 Karsten Keil
 dnl Copyright (c) 2011-2026 Intel Corporation; Author: H. Peter Anvin
+dnl Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
 dnl
 dnl Process this file with autoconf 2.71 or later to produce
 dnl a configure script.
@@ -20,6 +21,38 @@ PA_CROSS_COMPILE
 dnl Enable any available C extensions
 PA_PROG_CC
 AC_USE_SYSTEM_EXTENSIONS
+
+dnl C99 is the minimum supported C language and library version.
+AC_MSG_CHECKING([for C99 compiler and library support])
+AC_LINK_IFELSE([AC_LANG_SOURCE([
+#include <stdbool.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <stdlib.h>
+
+struct c99_flex_array {
+        int value;
+        char flex@<:@@:>@;
+};
+
+static inline bool
+c99_supported(const uint16_t values@<:@static 1@:>@, uintmax_t *restrict result)
+{
+        *result = strtoumax("0", NULL, 10);
+        return values@<:@0@:>@ == 0;
+}
+
+int
+main(void)
+{
+        uint16_t values@<:@@:>@ = { @<:@0@:>@ = 0 };
+        uintmax_t result;
+
+        return !c99_supported(values, &result);
+}
+])],
+[AC_MSG_RESULT([yes])],
+[AC_MSG_FAILURE([a C99 compiler and library are required])])
 
 dnl Options for debugging and profiling
 PA_OPTION_DEBUG
@@ -49,8 +82,6 @@ PA_ADD_CFLAGS([-fno-common])
 
 dnl Tests which may trigger warnings on some compilers
 AC_C_CONST
-AC_C_INLINE
-AC_C_RESTRICT
 
 dnl Checks for header files.
 AC_CHECK_INCLUDES_DEFAULT
@@ -61,14 +92,11 @@ XTRA=false
 AC_SEARCH_LIBS([strerror],[cposix])
 
 AC_CHECK_HEADERS_ONCE(grp.h)
-AC_CHECK_HEADERS_ONCE(inttypes.h)
 AC_CHECK_HEADERS_ONCE(libgen.h)
 AC_CHECK_HEADERS_ONCE(locale.h)
 AC_CHECK_HEADERS_ONCE(paths.h)
 AC_CHECK_HEADERS_ONCE(poll.h)
 AC_CHECK_HEADERS_ONCE(setjmp.h)
-AC_CHECK_HEADERS_ONCE(stdbool.h)
-AC_CHECK_HEADERS_ONCE(stdint.h)
 AC_CHECK_HEADERS_ONCE(stdnoreturn.h)
 AC_CHECK_HEADERS_ONCE(strings.h)
 AC_CHECK_HEADERS_ONCE(sysexits.h)
@@ -78,13 +106,9 @@ AC_CHECK_HEADERS_ONCE(sys/ioctl.h)
 AC_CHECK_HEADERS_ONCE(sys/select.h)
 AC_CHECK_HEADERS_ONCE(sys/stat.h)
 AC_CHECK_HEADERS_ONCE(sys/time.h)
-PA_CHECK_INTTYPES_H_SANE
 
 dnl This is needed on some versions of FreeBSD...
 AC_CHECK_HEADERS_ONCE(machine/param.h)
-
-dnl Looking for bool variants just in case <stdbool.h> is missing
-AC_CHECK_TYPES([_Bool, bool])
 
 dnl Windows...
 PA_ADD_HEADERS(windows.h)
@@ -105,12 +129,6 @@ AC_TYPE_OFF_T
 AC_TYPE_PID_T
 AC_TYPE_MODE_T
 AC_TYPE_SIZE_T
-AC_CHECK_TYPES(intmax_t)
-AC_CHECK_TYPES(long long)
-AC_CHECK_TYPES(uint16_t)
-AC_CHECK_TYPES(uint32_t)
-AC_CHECK_TYPES(uint64_t)
-
 AC_CHECK_TYPES(socklen_t)
 AC_CHECK_TYPES(sa_family_t)
 
@@ -347,9 +365,7 @@ dnl
 dnl Test compiler features. On some compilers, this can be affected
 dnl by -Werror options, so run this *after* those options are added.
 dnl
-PA_CHECK_BAD_STDC_INLINE
 PA_C_TYPEOF
-PA_C_FLEXMEMBER
 PA_DEPEND
 
 AC_CONFIG_HEADERS([config/config.h])

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  *
  *   Copyright 2001-2025 H. Peter Anvin - All Rights Reserved
+ *   Copyright (C) 2026 H. Peter Anvin <hpa@zytor.com>
  *
  * ----------------------------------------------------------------------- */
 
@@ -34,22 +35,9 @@
 #include <signal.h>
 #include <limits.h>
 #include <stdarg.h>
-
-#ifdef HAVE_STDBOOL_H
 #include <stdbool.h>
-#elif !defined(HAVE_BOOL)       /* bool, true, false as keywords? */
-#if defined(HAVE__BOOL)
-typedef _Bool bool;
-#else
-typedef char bool;
-#endif
-#ifndef true
-#define true 1
-#endif
-#ifndef false
-#define false 0
-#endif
-#endif
+#include <stdint.h>
+#include <inttypes.h>
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -65,14 +53,6 @@ typedef char bool;
 
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
-#endif
-
-#if defined(HAVE_INTTYPES_H) && defined(INTTYPES_H_IS_SANE)
-#include <inttypes.h>
-#elif defined(HAVE_STDINT_H)
-#include <stdint.h>
-#else
-#include "lib/int_type.h"
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -189,68 +169,6 @@ typedef char bool;
 # else
 #  define O_NONBLOCK	0
 # endif
-#endif
-
-/* If we don't have intmax_t, try creating it */
-
-#ifndef HAVE_INTMAX_T
-#ifdef HAVE_LONG_LONG
-typedef long long intmax_t;
-typedef unsigned long long uintmax_t;
-#define PRIdMAX	"lld"
-#define PRIuMAX "llu"
-#define PRIxMAX "llx"
-#define INTMAX_C(x)  (x##LL)
-#define UINTMAX_C(x) (x##ULL)
-#else
-typedef long intmax_t;
-typedef unsigned long uintmax_t;
-#define PRIdMAX "ld"
-#define PRIuMAX "lu"
-#define PRIxMAX "lx"
-#define INTMAX_C(x)  (x##L)
-#define UINTMAX_C(x) (x##UL)
-#endif
-#endif
-
-/* On some version of AIX, <inttypes.h> is buggy to the point of
-   unusability.  We have to use macros here, not typedefs, to override. */
-#ifdef HAVE_INTTYPES_H
-#ifndef INTTYPES_H_IS_SANE
-#undef PRIdMAX
-#undef PRIuMAX
-#undef PRIxMAX
-#undef INTMAX_C
-#undef UINTMAX_C
-#undef HAVE_STRTOUMAX
-
-#ifdef HAVE_LONG_LONG
-#define intmax_t long long
-#define uintmax_t unsigned long long
-#define PRIdMAX	"Ld"
-#define PRIuMAX "Lu"
-#define PRIxMAX "Lx"
-#define INTMAX_C(x)  (x##LL)
-#define UINTMAX_C(x) (x##ULL)
-#else
-#define intmax_t long
-#define uintmax_t unsigned long
-#define PRIdMAX	"ld"
-#define PRIuMAX "lu"
-#define PRIxMAX "lx"
-#define INTMAX_C(x)  (x##L)
-#define UINTMAX_C(x) (x##UL)
-#endif
-#endif
-#endif
-
-/* Even if intmax_t is defined, we may need this (Solaris 8 braindamage) */
-#ifndef HAVE_STRTOUMAX
-#if defined(HAVE_LONG_LONG) && defined(HAVE_STRTOULL)
-#define strtoumax(p,e,b) ((uintmax_t)strtoull(p,e,b))
-#else
-#define strtoumax(p,e,b) ((uintmax_t)strtoul(p,e,b))
-#endif
 #endif
 
 /* A lot of this is old BSD code.  Some newer systems don't approve. */
