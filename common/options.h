@@ -13,7 +13,7 @@ struct common_options {
     int ai_fam;
     unsigned int portrange_from;
     unsigned int portrange_to;
-    unsigned int max_blksize;
+    int blksize;                /* Relative to MTU if <= 0 */
     unsigned int max_windowsize;
 };
 

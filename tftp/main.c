@@ -65,13 +65,13 @@ struct common_options xopt = {
 #else
     .ai_fam = AF_INET,
 #endif
-    .max_blksize = SEGSIZE
+    .blksize = SEGSIZE
 };
 
-union sock_addr peeraddr;
-int f = -1;
-static uint16_t port;
-static bool connected;
+struct server_info serv;
+
+union sock_addr servaddr;
+bool connected;                 /* servaddr set */
 #ifdef WITH_READLINE
 static char *line = NULL;
 #else
@@ -83,13 +83,6 @@ static char *margv[MARGVSIZE];
 static const char *const prompt = "tftp> ";
 sigjmp_buf toplevel;
 static void intr(int);
-static const struct servent *sp;
-
-#ifdef HAVE_IPV6
-static int ai_fam_sock = AF_UNSPEC;
-#else
-static int ai_fam_sock = AF_INET;
-#endif
 
 static void help_init(void);
 static int print_cmd_help(const char *);
@@ -382,7 +375,6 @@ static const char short_options[] = "+46vVlm:cR:B:W:w:abTh";
 
 int main(int argc, char *argv[])
 {
-    union sock_addr sa;
     int optc, ret;
     static int pargc, peerargc;
     static char **pargv;
@@ -472,10 +464,8 @@ int main(int argc, char *argv[])
             }
             break;
         case 'B':
-            if (!parse_uint_range(optarg, 8, MAX_SEGSIZE,
-                                  &xopt.max_blksize)) {
-                fprintf(stderr, "Bad block size: %s (8-%d)\n", optarg,
-                        MAX_SEGSIZE);
+            if (!parse_blocksize_arg(optarg, MIN_SEGSIZE)) {
+                fprintf(stderr, "Bad block size argument: %s\n", optarg);
                 exit(EX_USAGE);
             }
             break;
@@ -503,26 +493,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    ai_fam_sock = xopt.ai_fam;
-
     pargv = argv + optind;
     pargc = argc - optind;
-
-    sp = getservbyname("tftp", "udp");
-    if (sp == 0) {
-        struct servent *fallback_sp;
-
-        /* Use canned values */
-        if (copt.verbose)
-            fprintf(stderr,
-                    "tftp: tftp/udp: unknown service, faking it...\n");
-        fallback_sp = xmalloc(sizeof(*fallback_sp));
-        fallback_sp->s_name = (char *)"tftp";
-        fallback_sp->s_aliases = NULL;
-        fallback_sp->s_port = htons(TFTP_IP_PORT);
-        fallback_sp->s_proto = (char *)"udp";
-        sp = fallback_sp;
-    }
 
     /* Allow SIGINT in non-interactive mode to terminate the program */
     if (!copt.iscmd)
@@ -533,21 +505,6 @@ int main(int argc, char *argv[])
         if (sigsetjmp(toplevel, 1) != 0)
             exit(EX_NOHOST);
         (void)setpeer(peerargc, peerargv);
-    }
-
-    if (ai_fam_sock == AF_UNSPEC)
-        ai_fam_sock = AF_INET;
-
-    f = socket(ai_fam_sock, SOCK_DGRAM, 0);
-    if (f < 0) {
-        perror("tftp: socket");
-        exit(EX_OSERR);
-    }
-    bzero(&sa, sizeof(sa));
-    sa.sa.sa_family = ai_fam_sock;
-    if (pick_port_bind(f, &sa)) {
-        perror("tftp: bind");
-        exit(EX_OSERR);
     }
 
     if (copt.iscmd) {
@@ -594,8 +551,6 @@ int main(int argc, char *argv[])
     return 0;                   /* Never reached */
 }
 
-static char *hostname;
-
 /* Called when a command is incomplete; modifies
    the global variable "line" */
 static bool getmoreargs(const char *partial, const char *mprompt)
@@ -640,8 +595,6 @@ static bool getmoreargs(const char *partial, const char *mprompt)
 
 static int setpeer(int argc, char *argv[])
 {
-    int err;
-
     if (argc < 2) {
         if (!getmoreargs("connect ", "(to) "))
             return EX_USAGE;
@@ -654,53 +607,7 @@ static int setpeer(int argc, char *argv[])
         return EX_USAGE;
     }
 
-    err = set_transfer_host(argv[1], argc == 3 ? argv[2] : NULL);
-    if (err) {
-        if (err == EAI_SERVICE)
-            printf("%s: bad port number\n", argv[2]);
-        else {
-            printf("Error: %s\n", gai_strerror(err));
-            printf("%s: unknown host\n", argv[1]);
-        }
-        connected = false;
-        return err == EAI_SERVICE ? EX_USAGE : EX_NOHOST;
-    }
-    if (f == -1) { /* socket not open */
-        ai_fam_sock = xopt.ai_fam;
-    } else { /* socket was already open */
-        if (ai_fam_sock != xopt.ai_fam) { /* need reopen socken for new family */
-            union sock_addr sa;
-
-            close(f);
-            ai_fam_sock = xopt.ai_fam;
-            f = socket(ai_fam_sock, SOCK_DGRAM, 0);
-            if (f < 0) {
-                perror("tftp: socket");
-                exit(EX_OSERR);
-            }
-            bzero((char *)&sa, sizeof (sa));
-            sa.sa.sa_family = ai_fam_sock;
-            if (pick_port_bind(f, &sa)) {
-                perror("tftp: bind");
-                exit(EX_OSERR);
-            }
-        }
-    }
-    if (argc == 2)
-        port = sp->s_port;
-
-    if (copt.verbose) {
-        char tmp[INET6_ADDRSTRLEN];
-        const char *tp;
-        tp = inet_ntop(peeraddr.sa.sa_family, SOCKADDR_P(&peeraddr),
-                       tmp, INET6_ADDRSTRLEN);
-        if (!tp)
-            tp = "???";
-        printf("Connected to %s (%s), port %u\n",
-               hostname, tp, (unsigned int)ntohs(port));
-    }
-    connected = true;
-    return 0;
+    return set_transfer_host(argv[1], argc == 3 ? argv[2] : NULL);
 }
 
 static int modecmd(int argc, char *argv[])
@@ -758,33 +665,82 @@ static void settftpmode(const struct modes *newmode)
         printf("mode set to %s\n", copt.mode->m_mode);
 }
 
-static int set_transfer_host(char *host, const char *port_name)
+/*
+ * Simple wrapper around getaddrinfo().
+ */
+static int
+set_sock_addr(char **hostp, const char *port,
+              union sock_addr *s, socklen_t *slen)
 {
-    const struct servent *service;
+    char *host = *hostp;
+    struct addrinfo *addrResult;
+    struct addrinfo hints;
     int err;
 
-    peeraddr.sa.sa_family = xopt.ai_fam;
-    err = set_sock_addr(host, &peeraddr, &hostname, false);
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = s->sa.sa_family;
+    hints.ai_flags = AI_CANONNAME | AI_ADDRCONFIG;
+#ifdef AI_IDN
+    hints.ai_flags |= AI_IDN;
+#endif
+#ifdef AI_CANONIDN
+    hints.ai_flags |= AI_CANONIDN;
+#endif
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    err = getaddrinfo(strip_address(host), port, &hints, &addrResult);
     if (err)
         return err;
+    if (addrResult == NULL)
+        return EAI_NONAME;
+    memcpy(s, addrResult->ai_addr, addrResult->ai_addrlen);
+    *slen = addrResult->ai_addrlen;
 
-    if (port_name) {
-        service = getservbyname(port_name, "udp");
-        if (service) {
-            port = service->s_port;
+    if (addrResult->ai_canonname)
+        *hostp = xstrdup(addrResult->ai_canonname);
+    else
+        *hostp = xstrdup(host);
+
+    freeaddrinfo(addrResult);
+    return 0;
+}
+
+static int set_transfer_host(char *host, const char *port)
+{
+    int err;
+
+    if (!port || !*port)
+        port = "tftp";
+
+    xzero(serv.addr);
+    serv.addr.sa.sa_family = xopt.ai_fam;
+    xdelete(serv.host);
+    xdelete(serv.canonname);
+    xdelete(serv.addr_str);
+
+    serv.canonname = serv.host = xstrdup(host);
+    err = set_sock_addr(&serv.canonname, port, &serv.addr, &serv.addrlen);
+    if (err) {
+        serv.connected = false;
+        if (err == EAI_SERVICE) {
+            fprintf(stderr, "%s: bad port/service: %s\n",
+                    _progname, port);
+            return EX_USAGE;
         } else {
-            char *ep;
-            unsigned long port_number = strtoul(port_name, &ep, 10);
-
-            if (*ep || port_number > 65535UL)
-                return EAI_SERVICE;
-
-            port = htons((uint16_t)port_number);
+            fprintf(stderr, "%s: %s: %s\n",
+                    _progname, serv.host, gai_strerror(err));
+            return EX_NOHOST;
         }
     }
 
-    xopt.ai_fam = peeraddr.sa.sa_family;
-    connected = true;
+    serv.connected = true;
+
+    serv.addr_str = net_address(&serv.addr.sa, serv.addrlen);
+
+    if (copt.verbose) {
+        printf("Connected to %s (%s) %s\n",
+               serv.host, serv.canonname, serv.addr_str);
+    }
     return 0;
 }
 
@@ -830,15 +786,11 @@ static int putfiles(int argc, char *argv[], bool target_is_directory)
         targ = strchr(cp, ':');
         *targ++ = 0;
         err = set_transfer_host(cp, NULL);
-        if (err) {
-            printf("Error: %s\n", gai_strerror(err));
-            printf("%s: unknown host\n", cp);
-            connected = false;
+        if (err)
             return EX_NOHOST;
-        }
     }
-    if (!connected) {
-        printf("No target machine specified.\n");
+    if (!serv.connected) {
+        fprintf(stderr, "%s: %s: no server host specified\n", _progname, targ);
         return EX_USAGE;
     }
     if (!target_is_directory &&
@@ -846,16 +798,14 @@ static int putfiles(int argc, char *argv[], bool target_is_directory)
         cp = argc == 2 ? tail(targ) : argv[1];
         fd = open(cp, O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
-            fprintf(stderr, "tftp: ");
-            perror(cp);
-            return EX_OSERR;
+            fprintf(stderr, "%s: %s: %s\n",
+                    _progname, targ, strerror(errno));
+            return EX_NOINPUT;
         }
         if (copt.verbose)
             printf("putting %s to %s:%s [%s]\n",
-                   cp, hostname, targ, copt.mode->m_mode);
-        sa_set_port(&peeraddr, port);
-        return tftp_sendfile(fd, targ, copt.mode->m_mode,
-                             xopt.max_windowsize);
+                   cp, serv.host, targ, copt.mode->m_mode);
+        return tftp_sendfile(fd, targ, copt.mode->m_mode);
     }
     /* this assumes the target is a directory */
     /* on a remote unix system.  hmmmm.  */
@@ -876,10 +826,8 @@ static int putfiles(int argc, char *argv[], bool target_is_directory)
         }
         if (copt.verbose)
             printf("putting %s to %s:%s [%s]\n",
-                   argv[n], hostname, remotepath, copt.mode->m_mode);
-        sa_set_port(&peeraddr, port);
-        result = tftp_sendfile(fd, remotepath, copt.mode->m_mode,
-                               xopt.max_windowsize);
+                   argv[n], serv.host, remotepath, copt.mode->m_mode);
+        result = tftp_sendfile(fd, remotepath, copt.mode->m_mode);
         if (!err)
             err = result;
         free(remotepath);
@@ -928,7 +876,7 @@ static int getfiles(int argc, char *argv[], const char *local_directory)
         getusage(argv[0]);
         return EX_USAGE;
     }
-    if (!connected) {
+    if (!serv.connected) {
         for (n = 1; n < argc - !!local_directory; n++)
             if (copt.literal || strchr(argv[n], ':') == 0) {
                 getusage(argv[0]);
@@ -965,10 +913,8 @@ static int getfiles(int argc, char *argv[], const char *local_directory)
             }
             if (copt.verbose)
                 printf("getting from %s:%s to %s [%s]\n",
-                       hostname, src, cp, copt.mode->m_mode);
-            sa_set_port(&peeraddr, port);
-            err = tftp_recvfile(fd, src, copt.mode->m_mode,
-                                xopt.max_windowsize);
+                       serv.host, src, cp, copt.mode->m_mode);
+            err = tftp_recvfile(fd, src, copt.mode->m_mode);
             break;
         }
         if (local_directory) {
@@ -992,10 +938,8 @@ static int getfiles(int argc, char *argv[], const char *local_directory)
         }
         if (copt.verbose)
             printf("getting from %s:%s to %s [%s]\n",
-                   hostname, src, cp, copt.mode->m_mode);
-        sa_set_port(&peeraddr, port);
-        result = tftp_recvfile(fd, src, copt.mode->m_mode,
-                               xopt.max_windowsize);
+                   serv.host, src, cp, copt.mode->m_mode);
+        result = tftp_recvfile(fd, src, copt.mode->m_mode);
         if (!err)
             err = result;
         if (local_directory)
@@ -1081,12 +1025,12 @@ static int setblocksize(int argc, char *argv[])
         argv = margv;
     }
     if (argc != 2) {
-        printf("usage: %s size\n", argv[0]);
+        printf("usage: %s {size|mtu[-slack]}\n", argv[0]);
         return EX_USAGE;
     }
-    if (!parse_uint_range(argv[1], 8, MAX_SEGSIZE, &xopt.max_blksize)) {
-        printf("%s: bad block size (valid range is 8-%d)\n",
-               argv[1], MAX_SEGSIZE);
+    if (!parse_blocksize_arg(argv[1], MIN_SEGSIZE)) {
+        printf("%s: bad block size (valid range is %d-%d)\n",
+               argv[1], MIN_SEGSIZE, MAX_SEGSIZE);
         return EX_USAGE;
     }
     return 0;
@@ -1135,16 +1079,24 @@ static int status(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
-    if (connected)
-        printf("Connected to %s.\n", hostname);
-    else
-        printf("Not connected.\n");
-    printf("Mode: %s Verbose: %s Tracing: %s Literal: %s\n", copt.mode->m_mode,
+    if (serv.connected) {
+        printf("Connected to: %s (%s) %s",
+               serv.host, serv.canonname, serv.addr_str);
+    } else {
+        printf("Not connected");
+    }
+    printf("Mode: %s Verbose: %s Tracing: %s Literal: %s\n",
+           copt.mode->m_mode,
            copt.verbose ? "on" : "off", copt.trace ? "on" : "off",
            copt.literal ? "on" : "off");
     printf("Rexmt-interval: %d seconds, Max-timeout: %d seconds\n",
            copt.rexmtval, copt.maxtimeout);
-    printf("Blocksize: %u, windowsize: %u, tsize: %s\n", xopt.max_blksize,
+    printf("Blocksize: ");
+    if (xopt.blksize <= 0)
+        printf("mtu");
+    if (xopt.blksize != 0)
+        printf("%d", xopt.blksize);
+    printf(", windowsize: %u, tsize: %s\n",
            xopt.max_windowsize ? xopt.max_windowsize : 1,
            copt.tsize ? "on" : "off");
     return 0;

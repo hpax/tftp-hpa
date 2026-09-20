@@ -17,19 +17,42 @@
  */
 #include "extern.h"
 
-extern union sock_addr peeraddr; /* filled in by main */
-extern int f;                    /* the opened socket */
+struct peer {
+    union sock_addr addr;       /* will be modified with transfer ID */
+    socklen_t addrlen;
+    union sock_addr myaddr;     /* local address */
+    int sock;                   /* socket file descriptor */
+    bool connected;             /* connected to a transfer ID */
+};
+static struct peer peer = { .sock = -1 };
 
 static unsigned long timeout;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 
-static void nak(int, const char *);
-static int makerequest(struct tftphdr **, int *,
-                       int, const char *, const char *,
-                       unsigned int, unsigned int, off_t);
-static bool parse_oack(const struct tftphdr *, int, unsigned int,
-                       unsigned int, unsigned int *, unsigned int *);
+struct optreq {
+    unsigned int options;       /* Bitmap of options present */
+    unsigned int window;
+    unsigned int blksize;
+    off_t tsize;
+};
+
+/* Initialize a struct optreq with the default (no-option) values */
+static inline struct optreq *optreq_init(struct optreq *optreq)
+{
+    optreq->options = 0;
+    optreq->tsize   = -1;
+    optreq->window  = 1;
+    optreq->blksize = SEGSIZE;
+    return optreq;
+}
+
+static int nak(const char *, int, const char *);
+static int makerequest(struct tftphdr **, struct optreq *,
+                       int, const char *, const char *);
+static bool
+parse_oack(struct optreq *optack, const struct optreq *optreq,
+           const struct tftphdr *tp, int length);
 static void printstats(const char *, uintmax_t);
 static void startclock(void);
 static void stopclock(void);
@@ -41,18 +64,46 @@ struct client_xfer_context {
     unsigned long timeout;
 };
 
+static bool address_match(const union sock_addr *a, const union sock_addr *b)
+{
+    if (a->sa.sa_family != b->sa.sa_family)
+        return false;
+
+    switch (a->sa.sa_family) {
+    case AF_INET:
+        return a->si.sin_addr.s_addr == b->si.sin_addr.s_addr;
+#ifdef HAVE_IPV6
+    case AF_INET6:
+        return !!IN6_ARE_ADDR_EQUAL(&a->s6.sin6_addr, &b->s6.sin6_addr);
+#endif
+    default:
+        return false;           /* Not supported */
+    }
+}
+
 static int client_recv_time(void *packet, int length, union sock_addr *from,
                             unsigned long *timeout_us_p)
 {
     socklen_t fromlen = sizeof(*from);
     int n;
 
-    n = tftp_recv_time(f, packet, length, 0, &from->sa, &fromlen,
-                       timeout_us_p);
-    if (n < 0 && errno == ETIMEDOUT)
-        timer(0);               /* Should not return */
-    if (n >= 0)
-        sa_set_port(&peeraddr, SOCKPORT(from));
+    do {
+        n = tftp_recv_time(peer.sock, packet, length, 0, &from->sa, &fromlen,
+                           timeout_us_p);
+        if (n < 0) {
+            if (errno == ETIMEDOUT)
+                timer(0);               /* Should not return */
+            return n;
+        }
+    } while (!address_match(&peer.addr, from));
+
+    if (n > 0 && !peer.connected) {
+        peer.addr = *from;
+        peer.addrlen = fromlen;
+        if (!connect(peer.sock, &from->sa, fromlen))
+            peer.connected = true;
+    }
+
     return n;
 }
 
@@ -61,8 +112,8 @@ static int client_xfer_send(void *vctx, const void *packet, int length)
     (void)vctx;
     if (copt.trace)
         tpacket("sent", packet, length);
-    return sendto(f, packet, length, 0, &peeraddr.sa,
-                  sizeof peeraddr) == length ? 0 : -1;
+    return sendto(peer.sock, packet, length, 0, &peer.addr.sa,
+                  peer.addrlen) == length ? 0 : -1;
 }
 
 static int client_xfer_recv(void *vctx, void *packet, int length)
@@ -112,6 +163,34 @@ static const struct tftp_xfer_ops client_xfer_ops = {
 };
 
 /*
+ * Printing error messages
+ */
+static void print_server_error(const char *file,
+                               const struct tftphdr *packet, int packet_len)
+{
+    char *error_str = errpkt_to_string(packet, packet_len);
+    fprintf(stderr, "%s: %s: server error: %s\n",
+            _progname, file, error_str);
+    xfree(error_str);
+}
+
+static void print_os_error(const char *file, const char *what, int err)
+{
+    fprintf(stderr, "%s: %s: %s%s%s%s\n",
+            _progname, file,
+            what ? what : "",
+            what ? " error" : "error",
+            err ? ": " : "",
+            err ? strerror(err) : "");
+}
+
+static void print_proto_error(const char *file, const char *what)
+{
+    fprintf(stderr, "%s: %s: server sent an invalid %s\n",
+            _progname, file, what);
+}
+
+/*
  * The maximum possible size of an OACK packet plus at least one extra
  * byte: the options we try to negotiate, plus their values; if the
  * OACK packet is larger than this it is faulty.
@@ -135,16 +214,61 @@ static const struct tftp_xfer_ops client_xfer_ops = {
  */
 #define TFTP_REPLY_MAX_PACKET_SIZE MAX(TFTP_OPTION_SPACE+2, SEGSIZE+4)
 
+static int open_socket(const char *name);
+static inline void close_socket(void)
+{
+    if (peer.sock >= 0) {
+        close(peer.sock);
+        peer.sock = -1;
+    }
+}
+
+static int open_socket(const char *name)
+{
+    if (!serv.connected) {
+        fprintf(stderr, "%s: %s%sno server host selected\n",
+                _progname, name ? name : "", name ? ": " : "");
+        return EX_USAGE;
+    }
+
+    close_socket();
+
+    /*
+     * Since the return port ("transfer ID") is unknown, the socket
+     * cannot be connected at this point; set the peer.addr port
+     * to 0 to reflect that.
+     */
+    peer.addr = serv.addr;
+    peer.addrlen = serv.addrlen;
+    peer.connected = false;
+
+    xzero(peer.myaddr);
+    peer.myaddr.sa.sa_family = peer.addr.sa.sa_family;
+
+    peer.sock = socket(peer.myaddr.sa.sa_family, SOCK_DGRAM, 0);
+    if (peer.sock < 0) {
+        print_os_error(name, "socket", errno);
+        return EX_OSERR;
+    }
+
+    if (pick_port_bind(peer.sock, &peer.myaddr)) {
+        print_os_error(name, "bind", errno);
+        close_socket();
+        return EX_OSERR;
+    }
+
+    return 0;
+}
+
 /*
  * Send the requested file.
  */
-int tftp_sendfile(int fd, const char *name, const char *mode,
-                  unsigned int requested_window)
+int tftp_sendfile(int fd, const char *name, const char *mode)
 {
     struct tftphdr * volatile response;
     struct tftphdr *req;
     union sock_addr from;
-    FILE *file = NULL;
+    FILE * volatile file = NULL;
     struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
     struct tftp_xfer xfer;
@@ -152,33 +276,37 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     int n, size;
     volatile int err = 0;
     bool convert = !strcmp(mode, "netascii");
-    unsigned int window;
-    unsigned int negotiated_block, negotiated_window;
-    int optionlen;
+    struct optreq optreq, optack;
     uint16_t ap_opcode, ap_block;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
     struct stat st;
-    off_t tsize = -1;
+
+    optreq_init(&optreq);
+    optreq_init(&optack);
+
+    err = open_socket(name);
+    if (err)
+        goto abort;
 
     if (!convert && !fstat(fd, &st) && S_ISREG(st.st_mode))
-        tsize = st.st_size;
+        optreq.tsize = st.st_size;
 
     response = xmalloc(TFTP_REPLY_MAX_PACKET_SIZE);
 
     startclock();
     file = fdopen(fd, convert ? "rt" : "rb");
     if (!file) {
+        print_os_error(name, "fdopen", errno);
         close(fd);
         err = EX_OSERR;
         goto abort;
     }
 
     tftp_signal(SIGALRM, timer, 0);
-    size = makerequest(&req, &optionlen, WRQ, name, mode,
-                       xopt.max_blksize, requested_window, tsize);
+    size = makerequest(&req, &optreq, WRQ, name, mode);
     if (size < 0) {
-        fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
+        print_os_error(name, "request", errno);
         err = EX_OSERR;
         goto abort;
     }
@@ -189,8 +317,9 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
         (void)sigsetjmp(timeoutbuf, 1);
         if (copt.trace)
             tpacket("sent", req, size);
-        if (sendto(f, req, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
-            perror("tftp: sendto");
+        if (sendto(peer.sock, req, size, 0, &peer.addr.sa, peer.addrlen)
+            != size) {
+            print_os_error(name, "send", errno);
             err = EX_OSERR;
             goto abort;
         }
@@ -199,7 +328,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
         n = client_recv_time(response, TFTP_REPLY_MAX_PACKET_SIZE,
                              &from, &r_timeout);
         if (n < 0) {
-            perror("tftp: recvfrom");
+            print_os_error(name, "receive", errno);
             err = EX_OSERR;
             goto abort;
         }
@@ -209,30 +338,23 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
             tpacket("received", response, n);
         ap_opcode = ntohs(response->th_opcode);
         if (ap_opcode == ERROR) {
-            char *error_string = errpkt_to_string(response, n);
-            printf("Error: %s\n", error_string);
-            xfree(error_string);
+            print_server_error(name, response, n);
             err = EX_PROTOCOL;
             goto abort;
         }
-        if (optionlen && ap_opcode == OACK) {
-            if (!parse_oack(response, n, xopt.max_blksize, requested_window,
-                            &negotiated_block, &negotiated_window)) {
-                nak(EOPTNEG, "Invalid option response");
+        if (ap_opcode == OACK) {
+            if (!parse_oack(&optack, &optreq, response, n)) {
+                print_proto_error(name, "option response");
+                nak(name, EOPTNEG, "Invalid option response");
                 err = EX_PROTOCOL;
                 goto abort;
             }
-            segsize = (int)negotiated_block;
-            window = negotiated_window;
-            tftp_set_socket_buffers(f, negotiated_block,
-                                    negotiated_window, true);
             break;
         }
         if (n >= 4) {
             ap_block = ntohs(response->th_block);
             if (ap_opcode == ACK && ap_block == 0) {
-                segsize = SEGSIZE;
-                window = 1;         /* Traditional server ignored options. */
+                /* Traditional server ignored options. */
                 break;
             }
         }
@@ -240,18 +362,20 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     }
 
     xfree(req);
+    tftp_set_socket_buffers(peer.sock, optack.blksize, optack.window, true);
 
-    io = tftp_io_reader_start(file, convert, window, window, segsize, false);
+    io = tftp_io_reader_start(file, convert, optack.window,
+                              optack.window, optack.blksize, false);
     if (!io) {
-        nak(-errno, NULL);
+        nak(name, -errno, NULL);
         err = EX_OSERR;
         goto abort;
     }
 
-    xfer.blocksize = segsize;
-    xfer.windowsize = window;
-    xfer.rollover = 0;
-    xfer.resend_oack = requested_window != 0;
+    xzero(xfer);
+    xfer.blocksize = optack.blksize;
+    xfer.windowsize = optack.window;
+    xfer.resend_oack = optack.window; /* THIS CAN'T BE RIGHT CHECK AGAIN */
     xfer.control = response;
     xfer.control_size = TFTP_REPLY_MAX_PACKET_SIZE;
     xfer.context = &context;
@@ -265,25 +389,21 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
 
     switch (result.status) {
     case TFTP_XFER_READ_ERROR:
-        nak(-result.error, NULL);
+        print_os_error(name, "file read", result.error);
+        nak(name, -result.error, NULL);
         err = EX_OSERR;
         break;
     case TFTP_XFER_SEND_ERROR:
-        errno = result.error;
-        perror("tftp: sendto");
+        print_os_error(name, "send", result.error);
         err = EX_OSERR;
         break;
     case TFTP_XFER_RECV_ERROR:
-        errno = result.error;
-        perror("tftp: recvfrom");
+        print_os_error(name, "receive", result.error);
         err = EX_OSERR;
         break;
     case TFTP_XFER_PEER_ERROR:
     {
-        char *error_string =
-            errpkt_to_string(result.packet, result.packet_len);
-        printf("Error: %s\n", error_string);
-        xfree(error_string);
+        print_server_error(name, result.packet, result.packet_len);
         err = EX_PROTOCOL;
         break;
     }
@@ -298,17 +418,17 @@ int tftp_sendfile(int fd, const char *name, const char *mode,
     stopclock();
     if (amount > 0)
         printstats("Sent", amount);
+    close_socket();
     return err;
 }
 
 /*
  * Receive a file.
  */
-int tftp_recvfile(int fd, const char *name, const char *mode,
-                  unsigned int requested_window)
+int tftp_recvfile(int fd, const char *name, const char *mode)
 {
     union sock_addr from;
-    FILE *file = NULL;
+    FILE * volatile file = NULL;
     struct tftp_io * volatile io = NULL;
     struct client_xfer_context context;
     struct tftp_xfer xfer;
@@ -323,26 +443,33 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     int n, size;
     volatile int err = 0;
     bool convert = !strcmp(mode, "netascii");
-    unsigned int window;
-    unsigned int negotiated_block, negotiated_window;
-    int optionlen;
+    struct optreq optreq, optack;
     uint16_t opcode;
     unsigned long r_timeout;
     volatile uintmax_t amount = 0;
 
+    optreq_init(&optreq);
+    optreq.tsize = 0;
+
+    optreq_init(&optack);
+
+    err = open_socket(name);
+    if (err)
+        goto abort;
+
     startclock();
     file = fdopen(fd, convert ? "wt" : "wb");
     if (!file) {
+        print_os_error(name, "fdopen", errno);
         close(fd);
         err = EX_OSERR;
         goto abort;
     }
     initial_packet = xmalloc(TFTP_REPLY_MAX_PACKET_SIZE);
 
-    size = makerequest(&req, &optionlen, RRQ, name, mode,
-                       xopt.max_blksize, requested_window, 0);
+    size = makerequest(&req, &optreq, RRQ, name, mode);
     if (size < 0) {
-        fprintf(stderr, "tftp: %s: %s\n", name, strerror(errno));
+        print_os_error(name, "request", errno);
         err = EX_OSERR;
         goto abort;
     }
@@ -354,8 +481,8 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
         (void)sigsetjmp(timeoutbuf, 1);
         if (copt.trace)
             tpacket("sent", req, size);
-        if (sendto(f, req, size, 0, &peeraddr.sa, sizeof peeraddr) != size) {
-            perror("tftp: sendto");
+        if (sendto(peer.sock, req, size, 0, &peer.addr.sa, peer.addrlen) != size) {
+            print_os_error(name, "send", errno);
             err = EX_OSERR;
             goto abort;
         }
@@ -364,7 +491,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
         n = client_recv_time(initial_packet, TFTP_REPLY_MAX_PACKET_SIZE,
                              &from, &r_timeout);
         if (n < 0) {
-            perror("tftp: recvfrom");
+            print_os_error(name, "receive", errno);
             err = EX_OSERR;
             goto abort;
         }
@@ -375,35 +502,26 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
         if (copt.trace)
             tpacket("received", initial_packet, n);
         if (opcode == ERROR) {
-            char *errmsg = errpkt_to_string(initial_packet, n);
-            printf("Error: %s\n", errmsg);
-            xfree(errmsg);
+            print_server_error(name, initial_packet, n);
             err = EX_PROTOCOL;
             goto abort;
         }
-        if (optionlen && opcode == OACK) {
-            if (!parse_oack(initial_packet, n, xopt.max_blksize,
-                            requested_window,
-                            &negotiated_block, &negotiated_window)) {
-                nak(EOPTNEG, "Invalid option response");
+        if (opcode == OACK) {
+            if (!parse_oack(&optack, &optreq, initial_packet, n)) {
+                print_proto_error(name, "option response");
+                nak(name, EOPTNEG, "Invalid option response");
                 err = EX_PROTOCOL;
                 goto abort;
             }
-            segsize = negotiated_block;
-            window = negotiated_window;
-            tftp_set_socket_buffers(f, negotiated_block,
-                                    negotiated_window, false);
-            initial_reply = xmalloc(4);
+            initial_reply = initial_packet; /* Reuse buffer */
+            initial_packet = NULL;
+            initial_packet_len = 0;
             initial_reply->th_opcode = htons(ACK);
             initial_reply->th_block = 0;
             initial_reply_len = 4;
-            xdelete(initial_packet);
-            initial_packet_len = 0;
         } else if (opcode == DATA && n >= 4 &&
                    ntohs(initial_packet->th_block) == 1) {
             /* Peer ignored/rejected requested options. */
-            segsize = SEGSIZE;
-            window = 1;
             break;
         } else {
             goto wait_for_reply;
@@ -412,27 +530,27 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     }
 
     xdelete(req);
+    tftp_set_socket_buffers(peer.sock, optack.blksize, optack.window, false);
 
-    io = tftp_io_writer_start(file, convert, window, segsize, false);
+    io = tftp_io_writer_start(file, convert, optack.window, optack.blksize,
+                              false);
     if (!io) {
-        nak(-errno, NULL);
+        nak(name, -errno, NULL);
         err = EX_OSERR;
         goto abort;
     }
 
     /* +5 to allow overrun detection when MSG_TRUNC is not supported */
-    datapkt = xmalloc(segsize + 5);
-    xfer.blocksize = segsize;
-    xfer.windowsize = window;
-    xfer.rollover = 0;
-    xfer.resend_oack = false;
-    xfer.control = ack;
-    xfer.control_size = 4;
+    datapkt = xmalloc(optack.blksize + 5);
+
+    xzero(xfer);
+    xfer.blocksize = optack.blksize;
+    xfer.windowsize = optack.window;
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
     xfer.io_context = io;
     xfer.io_ops = &tftp_io_xfer_ops;
-    tftp_xfer_recv(&xfer, datapkt, segsize + 5,
+    tftp_xfer_recv(&xfer, datapkt, optack.blksize + 5,
                    &initial_reply, initial_reply_len,
                    &initial_packet, initial_packet_len,
                    &result);
@@ -442,30 +560,35 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
-        nak(EBADOP, "Data packet too large");
+        print_proto_error(name, "data packet");
+        nak(name, EBADOP, "Data packet too large");
         err = EX_PROTOCOL;
         break;
     case TFTP_XFER_WRITE_ERROR:
-        nak(-result.error, NULL);
+        print_os_error(name, "file write", result.error);
+        nak(name, -result.error, NULL);
         err = EX_OSERR;
         break;
     case TFTP_XFER_SEND_ERROR:
-        errno = result.error;
-        perror("tftp: sendto");
+        print_os_error(name, "send", result.error);
         err = EX_OSERR;
         break;
     case TFTP_XFER_RECV_ERROR:
-        errno = result.error;
-        perror("tftp: recvfrom");
+        print_os_error(name, "receive", result.error);
         err = EX_OSERR;
         break;
     case TFTP_XFER_PEER_ERROR:
-        printf("Error code %d: %s\n", ntohs(result.packet->th_code),
-               result.packet->th_msg);
+        print_server_error(name, result.packet, result.packet_len);
         err = EX_PROTOCOL;
         break;
     default:
         break;
+    }
+
+    if (optack.tsize >= 0 && amount != (uintmax_t)optack.tsize) {
+        fprintf(stderr, "%s: %s: warning: expected %"PRIuMAX" bytes "
+                "received %"PRIuMAX"\n",
+                _progname, name, (uintmax_t)optack.tsize, amount);
     }
 
   abort:
@@ -479,14 +602,13 @@ int tftp_recvfile(int fd, const char *name, const char *mode,
     stopclock();
     if (amount > 0)
         printstats("Received", amount);
+    close_socket();
     return err;
 }
 
 static int
-makerequest(struct tftphdr **pkt, int *optionlen_p,
-            int request, const char *name, const char *mode,
-            unsigned int requested_block, unsigned int requested_window,
-            off_t tsize)
+makerequest(struct tftphdr **pkt, struct optreq *optreq,
+            int request, const char *name, const char *mode)
 {
     struct tftphdr *tp;
     char *cp;
@@ -497,24 +619,33 @@ makerequest(struct tftphdr **pkt, int *optionlen_p,
     namelen = strlen(name) + 1;
     modelen = strlen(mode) + 1;
     cp = optionbuf;
-    if (requested_block != SEGSIZE) {
+
+    optreq->options = 0;
+    optreq->blksize = tftp_max_blksize(peer.sock, &peer.addr);
+    optreq->window  = xopt.max_windowsize;
+
+    if (optreq->blksize != SEGSIZE) {
+        optreq->options |= 1 << PO_BLKSIZE;
         cp = mempcpy(cp, "blksize", sizeof "blksize");
         cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%u", requested_block) + 1;
+                       "%u", optreq->blksize) + 1;
     }
-    if (requested_window > 1) {
+    if (optreq->window > 1) {
+        optreq->options |= 1 << PO_WINDOWSIZE;
         cp = mempcpy(cp, "windowsize", sizeof "windowsize");
         cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%u", requested_window) + 1;
+                       "%u", optreq->window) + 1;
+    } else {
+        optreq->window = 1;
     }
-    if (tsize >= 0) {
+    if (optreq->tsize >= 0) {
+        optreq->options |= 1 << PO_TSIZE;
         cp = mempcpy(cp, "tsize", sizeof "tsize");
         cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%"PRIuMAX, (uintmax_t)tsize) + 1;
+                       "%"PRIuMAX, (uintmax_t)optreq->tsize) + 1;
     }
+
     optionlen = cp - optionbuf;
-    if (optionlen_p)
-        *optionlen_p = optionlen;
 
     /*
      * The request is encoded into tp as: opcode(2) name NUL mode NUL.
@@ -537,6 +668,7 @@ makerequest(struct tftphdr **pkt, int *optionlen_p,
     cp = mempcpy(cp, name, namelen);
     cp = mempcpy(cp, mode, modelen);
     memcpy(cp, optionbuf, optionlen);
+
     return pktsize;
 }
 
@@ -546,24 +678,23 @@ makerequest(struct tftphdr **pkt, int *optionlen_p,
  * duplicate, or unexpected option pairs.
  */
 static bool
-parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
-           unsigned int requested_window, unsigned int *negotiated_block,
-           unsigned int *negotiated_window)
+parse_oack(struct optreq *optack, const struct optreq *optreq,
+           const struct tftphdr *tp, int length)
 {
     const char *cp, *end, *nul;
     char *value_end;
-    unsigned long value;
-    bool found = false;
-    bool block_found = false;
-    bool window_found = false;
+    uintmax_t value;
+
+    optreq_init(optack);
 
     if (length <= 2 || ntohs(tp->th_opcode) != OACK)
         return false;
-    *negotiated_block = SEGSIZE;
-    *negotiated_window = 1;
+
     cp = (const char *)&tp->th_stuff;
     end = (const char *)tp + length;
     while (cp < end) {
+        /* Bitmask of repeated or non-requested options */
+        const unsigned int badopts = optack->options | ~optreq->options;
         const char *option = cp;
 
         nul = memchr(cp, '\0', (size_t)(end - cp));
@@ -576,53 +707,65 @@ parse_oack(const struct tftphdr *tp, int length, unsigned int requested_block,
         if (!nul || nul == cp)
             return false;
         errno = 0;
-        value = strtoul(cp, &value_end, 10);
+        value = strtoumax(cp, &value_end, 10);
         if (errno || value_end != nul)
             return false;
         if (ascii_strcaseeq(option, "blksize")) {
-            if (block_found || requested_block == SEGSIZE ||
-                value < 8 || value > requested_block)
+            if ((badopts & (1 << PO_BLKSIZE)) ||
+                value < MIN_SEGSIZE || value > optreq->blksize)
                 return false;
-            *negotiated_block = (unsigned int)value;
-            block_found = true;
+            optack->blksize = value;
+            optack->options |= 1 << PO_BLKSIZE;
         } else if (ascii_strcaseeq(option, "windowsize")) {
-            if (window_found || !requested_window ||
-                value < 1 || value > requested_window)
+            if ((badopts & (1 << PO_WINDOWSIZE)) ||
+                value < 1 || value > optreq->window)
                 return false;
-            *negotiated_window = (unsigned int)value;
-            window_found = true;
+            optack->window  = value;
+            optack->options |= 1 << PO_WINDOWSIZE;
         } else if (ascii_strcaseeq(option, "tsize")) {
-            /* For a get, should save the value for status + checking */
+            if (badopts & (1 << PO_TSIZE))
+                return false;
+            optack->tsize = value;
+            optack->options = 1 << PO_TSIZE;
         } else {
             /* Server sent us a unknown, unrequested option response... */
             return false;
         }
-        found = true;
         cp = nul + 1;
     }
-    return found;
+
+    /*
+     * This allows a null OACK packet, which is technically wrong, but
+     * there really isn't any reason to disallow it, either.
+     */
+    return true;
 }
 
 /*
  * Send a nak packet (error message).
- * Error code passed in is one of the
- * standard TFTP codes, or a UNIX errno
- * offset by 100.
+ *
+ * Error code passed in is one of the standard TFTP codes, or a
+ * negative errno value.
  */
-static void nak(int error, const char *msg)
+static int nak(const char *name, int error, const char *msg)
 {
     struct tftphdr *tp;
     int length;
+    int err = 0;
 
     length = make_errpacket(&tp, error, msg);
 
     if (copt.trace)
         tpacket("sent", tp, length);
-    if (sendto(f, tp, length, 0, &peeraddr.sa,
-               sizeof peeraddr) != length)
-        perror("nak");
+    if (sendto(peer.sock, tp, length, 0,
+               &peer.addr.sa, peer.addrlen) != length) {
+        err = errno;
+        if (name)
+            print_os_error(name, "send", err);
+    }
 
     xfree(tp);
+    return err;
 }
 
 static void tpacket(const char *s, const struct tftphdr *tp, int n)
@@ -774,7 +917,6 @@ static void timer(int sig)
 
     timeout <<= 1;
     if (timeout >= (unsigned long)copt.maxtimeout * USEC_PER_SEC) {
-        printf("Transfer timed out.\n");
         errno = save_errno;
         siglongjmp(toplevel, EX_TEMPFAIL);
     }

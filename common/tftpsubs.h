@@ -76,7 +76,7 @@ static inline void xfree(void *ptr)
  * Clears a buffer based on its type
  */
 #define xzeron(ptr,n) memset((ptr), 0, (n)*sizeof *(ptr))
-#define xzero(ptr)    xzeron(ptr,1)
+#define xzero(var)    xzeron(&(var),1)
 
 /*
  * Error checking versions of [v]asprintf()
@@ -167,14 +167,14 @@ static inline int sa_set_port(union sock_addr *s, uint16_t port)
        return 0;
 }
 
-int set_sock_addr(char *, union sock_addr *, char **, bool);
 void tftp_set_socket_buffers(int, unsigned int, unsigned int, bool);
 int tftp_recv_time(int, void *, int, unsigned int, struct sockaddr *,
                    socklen_t *, unsigned long *);
 const char *net_family(sa_family_t);
 char *net_address(const struct sockaddr *, socklen_t);
 
-unsigned int tftp_mtu_blksize(int fd, const union sock_addr *sa, int adjust);
+unsigned int tftp_max_blksize(int fd, const union sock_addr *sa);
+bool parse_blocksize_arg(const char *str, unsigned int minimum);
 
 /*
  * Wrappers for get/setsockopt() for the case where the option is an int.
@@ -186,10 +186,6 @@ static inline int setsockint(int sockfd, int level, int optname,
 {
     return setsockopt(sockfd, level, optname, &optval, sizeof(optval));
 }
-
-extern int segsize;
-#define MIN_SEGSIZE	8       /* Really impractically small, but... */
-#define MAX_SEGSIZE	65464
 
 int pick_port_bind(int sockfd, union sock_addr *myaddr);
 

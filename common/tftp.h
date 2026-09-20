@@ -60,4 +60,18 @@ struct tftphdr {
 /* TFTP default port */
 #define TFTP_IP_PORT	69
 
+/* Known protocol options. */
+/* Keep this in sync with enum protocol_options in common/tftp.h. */
+enum protocol_option_enum {
+    PO_BLKSIZE,
+    PO_BLKSIZE2,
+    PO_ROLLOVER,
+    PO_TIMEOUT,
+    PO_TSIZE,
+    PO_UTIMEOUT,
+    PO_WINDOWSIZE,
+
+    PO_NUM_OPTS
+};
+
 #endif /* TFTP_TFTP_H */

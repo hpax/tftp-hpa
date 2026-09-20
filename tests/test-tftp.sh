@@ -110,7 +110,7 @@ start_server() {
 	TFTPD_CMD+=(strace -o "$STRACE_LOG" -f)
     fi
 
-    TFTPD_CMD+=("$TFTPD" --stderr -vv --mtu -L -p --port-range $PORTRANGE)
+    TFTPD_CMD+=("$TFTPD" --stderr -vv -L -p --port-range $PORTRANGE)
     if [ $ANYADDR -ne 0 ]; then
 	if [ $PORT -ne 69 ]; then
 	    TFTPD_CMD+=(-a :$PORT)
@@ -198,7 +198,7 @@ create_test_files() {
 # Test file download (client receives)
 test_download() {
     local filename="$1"
-    local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
+    local -a tftp_options=(-v -B $BLKSIZE -W $WINSIZE "${@:2}")
     local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$DL_DIR"
@@ -226,10 +226,9 @@ test_download() {
     print_info "${TFTP_CMD[*]}"
     rm -f "$logfile"
     local start=$(date -u +%s.%N)
-    "${TFTP_CMD[@]}" 2>&1 > "$logfile"
+    "${TFTP_CMD[@]}"
     status=$?
     local end=$(date -u +%s.%N)
-    grep -v '^Connected ' "$logfile"
     print_info time = $(difftime $start $end)
 
     if [ $status -ne 0 ]; then
@@ -282,9 +281,8 @@ test_upload() {
     print_info "${TFTP_CMD[*]}"
     rm -f "$logfile"
     local start=$(date -u +%s.%N)
-    "${TFTP_CMD[@]}" 2>&1 > "$logfile"
+    "${TFTP_CMD[@]}"
     local end=$(date -u +%s.%N)
-    grep -v '^Connected ' "$logfile"
     print_info time = $(difftime $start $end)
 
     if [ $status -ne 0 ]; then

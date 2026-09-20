@@ -73,7 +73,8 @@ static uint16_t rollover_val = 0;
 #if MAX_WINDOWSIZE < 1
 # error MAX_WINDOWSIZE must be at least 1
 #endif
-static unsigned int windowsize = 1;
+static unsigned int windowsize;
+static unsigned int segsize;
 
 static union sock_addr myaddr;  /* Local address */
 static union sock_addr from;    /* Remote address */
@@ -103,8 +104,8 @@ struct common_options xopt = {
 #else
     .ai_fam = AF_INET,
 #endif
-    .max_blksize = MAX_SEGSIZE,
-    .max_windowsize = MAX_WINDOWSIZE
+    .max_windowsize = MAX_WINDOWSIZE,
+    .blksize = MAX_SEGSIZE
 };
 
 #ifdef WITH_REGEX
@@ -134,17 +135,6 @@ static size_t negotiate_options(struct tftphdr **tpp);
 static unsigned int io_ring_slots(void);
 static bool io_is_threaded(void);
 
-enum protocol_option_enum {
-    PO_BLKSIZE,
-    PO_BLKSIZE2,
-    PO_ROLLOVER,
-    PO_TIMEOUT,
-    PO_TSIZE,
-    PO_UTIMEOUT,
-    PO_WINDOWSIZE,
-    PO_NUM_OPTS
-};
-
 enum protocol_option_flags {
     POF_NONE   = 0,
     POF_REFUSE = 1,             /* Option to be refused */
@@ -162,14 +152,15 @@ struct daemon_protocol_option {
 
 #define POPT(n) { n, sizeof(n), POF_NONE, NULL, 0 }
 
+/* Keep this in sync with enum protocol_options_enum in common/tftp.h */
 static struct daemon_protocol_option protocol_options[PO_NUM_OPTS] = {
-    POPT("blksize"),
-    POPT("blksize2"),
-    POPT("rollover"),
-    POPT("timeout"),
-    POPT("tsize"),
-    POPT("utimeout"),
-    POPT("windowsize")
+    [PO_BLKSIZE]	= POPT("blksize"),
+    [PO_BLKSIZE2]	= POPT("blksize2"),
+    [PO_ROLLOVER]	= POPT("rollover"),
+    [PO_TIMEOUT]	= POPT("timeout"),
+    [PO_TSIZE]		= POPT("tsize"),
+    [PO_UTIMEOUT]	= POPT("utimeout"),
+    [PO_WINDOWSIZE]	= POPT("windowsize")
 };
 
 /* Signal handlers: just set a variable and return */
@@ -618,39 +609,10 @@ int main(int argc, char **argv)
             dopt.service = optarg;
             break;
         case 'B':
-            {
-                char *vp;
-                bool err = true;
-                unsigned long v;
-
-                if (ascii_strncaseeq(optarg, "mtu", 3)) {
-                    dopt.mtu = true;
-                    switch (optarg[3]) {
-                    case '\0':
-                        dopt.mtu_adj = 0;
-                        err = false;
-                        break;
-                    case '-':
-                        v = strtoul(optarg+4, &vp, 10);
-                        err = *vp || (v > INT_MAX/2);
-                        dopt.mtu_adj = -v;
-                        break;
-                    default:
-                        err = true;
-                    }
-                } else if (*optarg) {
-                    xopt.max_blksize = strtoul(optarg, &vp, 10);
-                    if (xopt.max_blksize >= SEGSIZE &&
-                        xopt.max_blksize <= MAX_SEGSIZE &&
-                        !*vp)
-                        err = false;
-                }
-
-                if (err) {
-                    tftpd_log(LOG_ERR,
-                              "Bad maximum blocksize value: %s", optarg);
-                    exit(EX_USAGE);
-                }
+            if (!parse_blocksize_arg(optarg, SEGSIZE)) {
+                tftpd_log(LOG_ERR,
+                          "Bad maximum block size argument: %s", optarg);
+                exit(EX_USAGE);
             }
             break;
         case 'W':
@@ -1493,13 +1455,9 @@ static void negotiate_blksize(void)
     struct daemon_protocol_option *blk  = opt_requested(PO_BLKSIZE);
     struct daemon_protocol_option *blk2 = opt_requested(PO_BLKSIZE2);
     unsigned int blksize = 0;
-    unsigned int max_blksize = xopt.max_blksize;
+    unsigned int max_blksize;
 
-    if (dopt.mtu) {
-        unsigned int mtu = tftp_mtu_blksize(peer, &from, dopt.mtu_adj);
-        if (mtu < max_blksize)
-            max_blksize = mtu;
-    }
+    max_blksize = tftp_max_blksize(peer, &from);
 
     if (blk2) {
         if (blk2->val < MIN_SEGSIZE) {

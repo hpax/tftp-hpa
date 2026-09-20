@@ -11,8 +11,6 @@
 #include "pollset.h"
 #include "clock.h"
 
-int segsize = SEGSIZE;          /* Default segsize */
-
 #define TFTP_SOCKET_BUFFER_MIN	(256U * 1024U)
 #define TFTP_SOCKET_BUFFER_MAX	(4U * 1024U * 1024U)
 #define TFTP_SOCKET_BUFFER_WINDOWS 2
@@ -72,42 +70,90 @@ static int set_socket_nonblock(int fd, bool flag)
  * Try to get the MTU of a connected socket, adjusted to account
  * for TFTP overhead.
  */
-unsigned int tftp_mtu_blksize(int fd, const union sock_addr *sa, int adjust)
+unsigned int tftp_max_blksize(int fd, const union sock_addr *sa)
 {
     int mtu;
 
-    errno = 0;
+    if (xopt.blksize <= 0) {
+        int adjust = xopt.blksize;
 
-    switch (sa->sa.sa_family) {
-    case AF_INET:
-        adjust -= 20 + 8 + 4;
+        mtu = -1;
+        errno = 0;
+
+        switch (sa->sa.sa_family) {
+        case AF_INET:
+            adjust -= 20 + 8 + 4;
 #ifdef IP_MTU
-        mtu = getsockint(fd, IPPROTO_IP, IP_MTU);
+            mtu = getsockint(fd, IPPROTO_IP, IP_MTU);
 #endif
-        break;
+            break;
 #ifdef HAVE_IPV6
-    case AF_INET6:
-        adjust -= 40 + 8 + 4;
+        case AF_INET6:
+            adjust -= 40 + 8 + 4;
 #ifdef IPV6_MTU
-        mtu = getsockint(fd, IPPROTO_IPV6, IPV6_MTU);
+            mtu = getsockint(fd, IPPROTO_IPV6, IPV6_MTU);
 #endif
-        break;
+            break;
 #endif
-    default:                    /* What is this?! */
-        return MAX_SEGSIZE;
+        default:                /* What is this?! */
+            break;
+        }
+
+        /* If querying the MTU failed, guess Ethernet */
+        if (errno || mtu < 0)
+            mtu = 1500;
+
+        mtu += adjust;
+
+        /* Don't allow MTU-based size to drop below SEGSIZE */
+        if (mtu < SEGSIZE)
+            mtu = SEGSIZE;
+    } else {
+        mtu = xopt.blksize;     /* Absolute */
+
+        /* Don't allow dropping below MIN_SEGSIZE */
+        if (mtu < MIN_SEGSIZE)
+            mtu = MIN_SEGSIZE;
     }
 
-    if (errno || mtu < 0)
-        mtu = 1500;             /* Default to an Ethernet MTU */
-
-    mtu += adjust;
-
-    if (mtu < SEGSIZE)
-        mtu = SEGSIZE;
-    else if (mtu > MAX_SEGSIZE)
+    /* Obviously cannot be beyond MAX_SEGSIZE */
+    if (mtu > MAX_SEGSIZE)
         mtu = MAX_SEGSIZE;
 
     return mtu;
+}
+
+bool parse_blocksize_arg(const char *str, unsigned int minimum)
+{
+    char *vp;
+    bool ok = false;
+    unsigned long v;
+    int blksize = 0;
+
+    if (ascii_strncaseeq(str, "mtu", 3)) {
+        switch (str[3]) {
+        case '\0':
+            blksize = 0;
+            ok = true;
+            break;
+        case '-':
+            v = strtoul(str+4, &vp, 10);
+            blksize = -v;
+            ok = !*vp && (v <= INT_MAX/2);
+            break;
+        default:
+            ok = true;
+            break;
+        }
+    } else if (*str) {
+        blksize = v = strtoul(str, &vp, 10);
+        ok = v >= minimum && v <= MAX_SEGSIZE && !*vp;
+    }
+
+    if (ok)
+        xopt.blksize = blksize;
+
+    return ok;
 }
 
 /*
@@ -210,40 +256,6 @@ int pick_port_bind(int sockfd, union sock_addr *myaddr)
         sa_set_port(myaddr, 0);
         return bind(sockfd, &myaddr->sa, SOCKLEN(myaddr));
     }
-}
-
-/*
- * Extract a sock_addr for a specific host. If "early" is set, this is
- * a socket intended to be bound as a standalone listening socket, and
- * should be bound to a specified address even if it is not yet configured
- * (e.g. due to network initialization delays.)
- */
-int set_sock_addr(char *host, union sock_addr *s, char **name, bool early)
-{
-    struct addrinfo *addrResult;
-    struct addrinfo hints;
-    int err;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = s->sa.sa_family;
-    hints.ai_flags = AI_CANONNAME;
-    hints.ai_flags |= early ? AI_PASSIVE : AI_ADDRCONFIG;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-    err = getaddrinfo(strip_address(host), NULL, &hints, &addrResult);
-    if (err)
-        return err;
-    if (addrResult == NULL)
-        return EAI_NONAME;
-    memcpy(s, addrResult->ai_addr, addrResult->ai_addrlen);
-    if (name) {
-        if (addrResult->ai_canonname)
-            *name = xstrdup(addrResult->ai_canonname);
-        else
-            *name = xstrdup(host);
-    }
-    freeaddrinfo(addrResult);
-    return 0;
 }
 
 #ifdef HAVE_IPV6
