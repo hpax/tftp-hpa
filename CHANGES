@@ -27,6 +27,8 @@ Changes in 7.1:
 	server. This is equivalent to
 	"--blocksize 512 --windowsize 1 --no-tsize".
 
+	The tftp client now defaults to octet (binary) mode.
+
 	The server now has an option --validate to force path name
 	validation even if --secure or --jail is used.
 

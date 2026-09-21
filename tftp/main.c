@@ -50,7 +50,7 @@ static const struct modes modes[] = {
 
 #define MODE_OCTET    (&modes[2])
 #define MODE_NETASCII (&modes[0])
-#define MODE_DEFAULT  MODE_NETASCII
+#define MODE_DEFAULT  MODE_OCTET
 
 struct tftp_options copt = {
     .mode = MODE_DEFAULT,
