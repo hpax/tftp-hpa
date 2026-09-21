@@ -758,8 +758,10 @@ static int set_transfer_host(char *host, const char *port)
     serv.addr_str = net_address(&serv.addr.sa, serv.addrlen);
 
     if (copt.verbose) {
-        printf("Connected to %s (%s) %s\n",
-               serv.host, serv.canonname, serv.addr_str);
+        printf("Connected to %s ", serv.host);
+        if (strcmp(serv.host, serv.canonname))
+            printf("(%s) ", serv.canonname);
+        printf("%s\n", serv.addr_str);
     }
     return 0;
 }
