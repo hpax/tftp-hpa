@@ -24,6 +24,8 @@ struct tftp_options {
     bool literal;
     bool tsize;
     bool iscmd;
+    bool no_options;
+    bool unsafe;
 };
 
 extern struct tftp_options copt;

@@ -65,7 +65,8 @@ struct common_options xopt = {
 #else
     .ai_fam = AF_INET,
 #endif
-    .blksize = SEGSIZE
+    .max_windowsize = 64,
+    .blksize = 0                /* Use MTU */
 };
 
 struct server_info serv;
@@ -327,6 +328,8 @@ static void usage(int errcode)
             "    -B, --blocksize size       set the requested transfer block size\n"
             "    -W, --windowsize size      set the requested transfer window size\n"
             "    -T, --no-tsize             disable sending the tsize TFTP option\n"
+            "    -N, --no-options           disable sending any TFTP options\n"
+            "    -U, --unsafe               allow multihomed server address changes\n"
             "    -c, --command command      execute \"command\", then exit (must be last)\n"
             "    -c, --command help         get a list of available commands\n"
             ,  _progname);
@@ -368,6 +371,8 @@ static const struct option long_options[] = {
     { "octet",      no_argument,       NULL, 'b' },
     { "no-tsize",   no_argument,       NULL, 'T' },
     { "help",       optional_argument, NULL, 'h' },
+    { "no-options", no_argument,       NULL, 'N' },
+    { "unsafe",     no_argument,       NULL, 'U' },
     { NULL,         0,                 NULL, 0 }
 };
 
@@ -480,6 +485,12 @@ int main(int argc, char *argv[])
             break;
         case 'T':
             copt.tsize = false;
+            break;
+        case 'N':
+            copt.no_options = false;
+            break;
+        case 'U':
+            copt.unsafe = false;
             break;
         case 'h':
             if (optarg && *optarg)

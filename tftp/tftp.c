@@ -95,7 +95,8 @@ static int client_recv_time(void *packet, int length, union sock_addr *from,
                 timer(0);               /* Should not return */
             return n;
         }
-    } while (!address_match(&peer.addr, from));
+    } while (!(address_match(&peer.addr, from) ||
+               (!peer.connected && !copt.unsafe)));
 
     if (n > 0 && !peer.connected) {
         peer.addr = *from;
@@ -620,29 +621,35 @@ makerequest(struct tftphdr **pkt, struct optreq *optreq,
     modelen = strlen(mode) + 1;
     cp = optionbuf;
 
-    optreq->options = 0;
-    optreq->blksize = tftp_max_blksize(peer.sock, &peer.addr);
-    optreq->window  = xopt.max_windowsize;
-
-    if (optreq->blksize != SEGSIZE) {
-        optreq->options |= 1 << PO_BLKSIZE;
-        cp = mempcpy(cp, "blksize", sizeof "blksize");
-        cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%u", optreq->blksize) + 1;
-    }
-    if (optreq->window > 1) {
-        optreq->options |= 1 << PO_WINDOWSIZE;
-        cp = mempcpy(cp, "windowsize", sizeof "windowsize");
-        cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%u", optreq->window) + 1;
+    if (copt.no_options) {
+        /* Reset all options */
+        optreq_init(optreq);
     } else {
-        optreq->window = 1;
-    }
-    if (optreq->tsize >= 0) {
-        optreq->options |= 1 << PO_TSIZE;
-        cp = mempcpy(cp, "tsize", sizeof "tsize");
-        cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
-                       "%"PRIuMAX, (uintmax_t)optreq->tsize) + 1;
+        /* Set default or configured options */
+        optreq->options = 0;
+        optreq->blksize = tftp_max_blksize(peer.sock, &peer.addr);
+        optreq->window  = xopt.max_windowsize;
+
+        if (optreq->blksize != SEGSIZE) {
+            optreq->options |= 1 << PO_BLKSIZE;
+            cp = mempcpy(cp, "blksize", sizeof "blksize");
+            cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
+                           "%u", optreq->blksize) + 1;
+        }
+        if (optreq->window > 1) {
+            optreq->options |= 1 << PO_WINDOWSIZE;
+            cp = mempcpy(cp, "windowsize", sizeof "windowsize");
+            cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
+                           "%u", optreq->window) + 1;
+        } else {
+            optreq->window = 1;
+        }
+        if (optreq->tsize >= 0) {
+            optreq->options |= 1 << PO_TSIZE;
+            cp = mempcpy(cp, "tsize", sizeof "tsize");
+            cp += snprintf(cp, sizeof optionbuf - (cp - optionbuf),
+                           "%"PRIuMAX, (uintmax_t)optreq->tsize) + 1;
+        }
     }
 
     optionlen = cp - optionbuf;

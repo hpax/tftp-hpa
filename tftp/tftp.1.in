@@ -8,7 +8,7 @@
 .\" Copyright 2001-2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTP 1 "18 September 2026" "tftp-hpa @@VERSION@@" "User's Manual"
+.TH TFTP 1 "20 September 2026" "tftp-hpa @@VERSION@@" "User's Manual"
 
 .SH "NAME"
 .B tftp
@@ -63,26 +63,60 @@ This is usually used with \-c.
 .TP
 \fB\-a\fP, \fB\-\-ascii\fP, \fB\-\-netascii\fP, \fB\-\-text\fP
 Equivalent to
-.BR "\-\-mode netascii" .
+.RB \\[lq] "\-\-mode netascii" \\[rq].
 .TP
 \fB\-b\fP, \fB\-\-binary\fP, \fB\-\-octet\fP
 Equivalent to
-.BR "\-\-mode octet" .
+.RB \\[lq] "\-\-mode octet" \\[rq].
 .TP
-\fB\-B\fP, \fB\-\-blocksize\fP \fIblock-size\fP
-Request the RFC 2348 \fBblksize\fP option.  This requests data blocks up
-to \fIblock-size\fP bytes; valid values are 8 through 65464.  The default
-does not request the option.
+\fB\-B\fP, \fB\-\-blocksize\fP \fImax-block-size\fP
+Specifies the maximum permitted block size.  The permitted range for
+this parameter is from 512 to 65464, or it can be specified as
+.RB \\[lq] mtu \\[rq],
+or \[lq]\fBmtu-\fP\fIslack\fP\[rq].
+When
+.B mtu
+is specified,
+.B tftp
+will try to query the maximum transmission unit (MTU) from the kernel
+and size the maximum block size accordingly. If
+.I slack
+is specified, the MTU value will be adjusted downward by
+.I slack
+bytes.
+.B tftp
+does not request the option if the block size is set to 512.
+.IP
+The default is
+.BR mtu .
 .TP
 \fB\-W\fP, \fB\-w\fP, \fB\-\-windowsize\fP \fIwindow-size\fP
 Request the RFC 7440 \fBwindowsize\fP option.  This permits up to
 \fIwindow-size\fP data blocks to be sent before an acknowledgment is
-required.  Valid values are 1 through 32768.  The default does not request
-the option.
+required.  Valid values are 1 through 32768.
+.B tftp
+does not request the option if the window size is set to 1.
+.IP
+The default is 64.
 .TP
 \fB\-T\fP, \fB\-\-no-tsize\fP
 Disable the sending of the RFC 2349 \fBtsize\fP (transfer size) option. The
 default is to send the option.
+.TP
+\fB\-N\fP, \fB\-\-no-options\fP
+Do not request any TFTP options, for maximum compatibility with old
+servers. This is equivalent to
+.br
+.RB \\[lq] "--blocksize 512 --windowsize 1 --no-tsize" \\[rq].
+.TP
+\fB\-U\fP, \fB\-\-unsafe\fP
+Allow a TFTP response to come from a different address than the server
+address to which the request was sent.
+.IP
+Some old TFTP servers have been known to return a response from a
+network address other than the one to which the request was originally
+sent. This increases the (already considerable) risk of connection
+hijacking, and is therefore disallowed by default.
 .TP
 \fB\-R\fP, \fB\-\-port-range\fP \fImin-port:max-port\fP
 Force the originating (local) port number to be in the specified range of port
@@ -117,7 +151,7 @@ Print help information
 .TP
 .B ascii
 Shorthand for
-.BR "mode ascii" .
+.RB \\[lq] "mode ascii" \\[rq].
 .TP
 .B binary
 Shorthand for
@@ -150,23 +184,28 @@ commands.
 Get a file or set of files from the specified sources.  A remote
 filename can be in one of two forms: a plain filename on the remote
 host, if the host has already been specified, or a string of the form
-.I "host:filename"
+.I host:filename
 to specify both a host and filename at the same time.  If the latter
 form is used, the last hostname specified becomes the default for
 future transfers.  Enable
 .B literal
-mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
+mode to prevent special treatment of the ':' character (e.g. if the
+desired filename is
+.RB \\[lq] "C:\\edir\\efile" \\[rq]).
 .TP
 \fBmget\fP \fIfile1 file2 ... local-directory\fP
 Get one or more files from the specified remote sources into
 \fIlocal-directory\fP.  Each remote filename can be a plain filename
 on the configured remote host, or a string of the form
-.I "host:filename"
+.I host:filename
 to specify both a host and filename at the same time.  If the latter
 form is used, the last hostname specified becomes the default for
 future transfers.  Enable
 .B literal
-mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
+mode to prevent special treatment of the
+.RB \\[lq] : \\[rq]
+character (e.g. if the desired filename is
+.RB \\[lq] "C:\\edir\\efile" \\[rq]).
 .TP
 .B literal
 Toggle literal mode.  When set, this mode prevents special treatment of ':' in filenames.
@@ -175,19 +214,20 @@ Toggle literal mode.  When set, this mode prevents special treatment of ':' in f
 Specify the mode for transfers;
 .I transfer-mode
 may be one of
-.B ascii
+.B netascii
 (or
-.BR netascii )
+.BR ascii )
 or
-.B binary
+.B octet
 (or
-.BR octet .)
+.BR binary .)
 The default is
-.BR ascii .
+.BR octet .
 .TP
 \fBblocksize\fP \fIblock-size\fP
-Request the RFC 2348 \fBblksize\fP option with \fIblock-size\fP bytes
-per data block. Valid values are 8 through 65464.
+Set the requested block size to \fIblock-size\fP. See the
+.B \-\-blocksize
+command-line option.
 .TP
 \fBput\fP \fIfile\fP
 .sp -.6l
@@ -199,7 +239,7 @@ per data block. Valid values are 8 through 65464.
 Put a file or set of files to the specified remote file or directory.
 The destination can be in one of two forms: a filename on the remote
 host, if the host has already been specified, or a string of the form
-.I "host:filename"
+.I host:filename
 to specify both a host and filename at the same time.  If the latter
 form is used, the hostname specified becomes the default for future
 transfers.  If the remote-directory form is used, the remote host is
@@ -212,7 +252,7 @@ mode to prevent special treatment of the ':' character (e.g. C:\\dir\\file).
 \fBmput\fP \fIfile1 file2 ... remote-directory\fP
 Put one or more files to \fIremote-directory\fP.  The destination can
 be a directory on the configured remote host, or a string of the form
-.I "host:directory"
+.I host:directory
 to specify both a host and directory at the same time.  If the latter
 form is used, the hostname specified becomes the default for future
 transfers.  The remote host is assumed to use

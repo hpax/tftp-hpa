@@ -8,7 +8,7 @@
 .\" Copyright 2001-2009, 2026 H. Peter Anvin - All Rights Reserved
 .\"
 .\"----------------------------------------------------------------------- */
-.TH TFTPD 8 "8 September 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
+.TH TFTPD 8 "20 September 2026" "tftp-hpa @@VERSION@@" "System Manager's Manual"
 
 .SH NAME
 .B tftpd
@@ -381,15 +381,21 @@ around broken clients.
 Disable all RFC 2347 options.  Requests containing options proceed
 directly to the normal TFTP data stage without an option acknowledgment.
 .TP
-\fB\-B\fP, \fB\-\-blocksize\fP {\fImax-block-size\fP|\fBmtu\fP[-\fIslack\fP]}
+\fB\-B\fP, \fB\-\-blocksize\fP \fImax-block-size\fP
 Specifies the maximum permitted block size.  The permitted range for
-this parameter is from 512 to 65464 or
-
-.RB \\[lq] mtu \\[rq]
-with an optional \fIslack\fP adjustment factor. In the latter case,
+this parameter is from 512 to 65464, or it can be specified as
+.RB \\[lq] mtu \\[rq],
+or \[lq]\fBmtu-\fP\fIslack\fP\[rq].
+When
+.B mtu
+is specified,
 .B tftpd
 will try to query the maximum transmission unit (MTU) from the kernel
-and size the blksize accordingly.
+and size the maximum block size accordingly. If
+.I slack
+is specified, the MTU value will be adjusted downward by
+.I slack
+bytes.
 .PP
 Some embedded clients request large block sizes and yet do not handle
 fragmented packets correctly; for that reason

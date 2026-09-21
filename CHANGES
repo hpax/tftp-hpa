@@ -2,10 +2,11 @@ Changes in 7.1:
 	A C99 compiler and standard library are now required to build
 	tftp-hpa.
 
-	The --blocksize (-B) option to the server can now be specified
-	as "mtu" or "mtu-nnn" where nnn is a number of additional
-	bytes to reserve; this bases the maximum block size on the MTU
-	as obtained from the kernel (if possible.)
+	The --blocksize (-B) option to both the server and the client
+	can now be specified as "mtu" or "mtu-nnn" where nnn is a
+	number of additional bytes to reserve; this bases the maximum
+	block size on the MTU as obtained from the kernel (if
+	possible; otherwise the Ethernet MTU of 1500 is assumed.)
 
 
 Changes in 7.0:
