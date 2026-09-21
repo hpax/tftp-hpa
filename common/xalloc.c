@@ -58,3 +58,9 @@ char *xstrdup(const char *s)
 {
     return check_null(strdup(s));
 }
+
+void *xmemdup(const void *p, size_t n)
+{
+    char *q = xmalloc(n);
+    return memcpy(q, p, n);
+}

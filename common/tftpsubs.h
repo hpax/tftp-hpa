@@ -22,6 +22,7 @@ MALLOC_FUNC(1) void *xmalloc(size_t);
 CALLOC_FUNC(1,2) void *xcalloc(size_t, size_t);
 REALLOC_FUNC(2) void *xrealloc(void *, size_t);
 NEWBUF_FUNC char *xstrdup(const char *);
+MALLOC_FUNC(2) void *xmemdup(const void *, size_t);
 static inline void xfree(void *ptr)
 {
     /* This is paranoia: free() is supposed to handle NULL already */
