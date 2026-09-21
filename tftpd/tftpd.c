@@ -1751,7 +1751,7 @@ static size_t build_oack(struct tftphdr **tpp)
             case POT_UINT:
                 /* Update the option data buffer */
                 xfree(po->str);
-                po->dsize = xasprintf(&po->str, "%"PRIu64, po->uint) + 1;
+                po->dsize = xasprintf(&po->str, "%"PRIuMAX, po->uint) + 1;
                 break;
             default:
                 break;
