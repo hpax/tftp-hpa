@@ -95,10 +95,11 @@ static int client_recv_time(void *packet, int length, union sock_addr *from,
                 timer(0);               /* Should not return */
             return n;
         }
-    } while (!(address_match(&peer.addr, from) ||
-               (!peer.connected && !copt.unsafe)));
+    } while (n < 2 ||
+             !(address_match(&peer.addr, from) ||
+               (!peer.connected && copt.unsafe)));
 
-    if (n > 0 && !peer.connected) {
+    if (!peer.connected) {
         peer.addr = *from;
         peer.addrlen = fromlen;
         if (!connect(peer.sock, &from->sa, fromlen))
