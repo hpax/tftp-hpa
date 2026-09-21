@@ -47,13 +47,13 @@ static inline void xfree(void *ptr)
  * This blindly assumes all data pointers have the same representation;
  * otherwise this would require using typeof().
  */
-#define xdelete(ptr)                                    \
+#define xdelete(_ptr)                                   \
     do {                                                \
-        void **pp = (void **)&(ptr);                    \
-        void *p = *pp;                                  \
-        if (p) {                                        \
-            *pp = NULL;                                 \
-            free(p);                                    \
+        void **_pp = (void **)&(_ptr);                  \
+        void *_p = *_pp;                                \
+        if (_p) {                                       \
+            *_pp = NULL;                                \
+            free(_p);                                   \
         }                                               \
     } while (0)
 
@@ -61,14 +61,14 @@ static inline void xfree(void *ptr)
  * Equivalent, but it takes a pointer to a pointer which might be NULL
  * itself.
  */
-#define xdeletep(ptrp)                                  \
+#define xdeletep(_ptrp)                                 \
     do {                                                \
-        void **pp = (void **)(ptrp);                    \
-        if (pp) {                                       \
-            void *p = *pp;                              \
-            if (p) {                                    \
-                *pp = NULL;                             \
-                free(p);                                \
+        void **_pp = (void **)(_ptrp);                  \
+        if (_pp) {                                      \
+            void *_p = *_pp;                            \
+            if (_p) {                                   \
+                *_pp = NULL;                            \
+                free(_p);                               \
             }                                           \
         }                                               \
     } while (0)
