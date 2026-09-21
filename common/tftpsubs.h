@@ -18,9 +18,9 @@ void set_progname(const char *);	/* main() should pass argv[0] here */
 void post_fork(void);                   /* Invoke in child after fork() */
 
 extern void (*out_of_memory)(void);	/* Optional out of memory handler */
-MALLOC_FUNC void *xmalloc(size_t);
-CALLOC_FUNC void *xcalloc(size_t, size_t);
-REALLOC_FUNC void *xrealloc(void *, size_t);
+MALLOC_FUNC(1) void *xmalloc(size_t);
+CALLOC_FUNC(1,2) void *xcalloc(size_t, size_t);
+REALLOC_FUNC(2) void *xrealloc(void *, size_t);
 NEWBUF_FUNC char *xstrdup(const char *);
 static inline void xfree(void *ptr)
 {
@@ -213,6 +213,14 @@ static inline unsigned char ascii_tolower(unsigned char c)
 
 bool ascii_strcaseeq(const char *s1, const char *s2);
 bool ascii_strncaseeq(const char *s1, const char *s2, size_t n);
+
+/*
+ * Convenience wrapper around sigaction()
+ */
+#ifndef HAVE_SIGHANDLER_T
+typedef void (*sighandler_t)(int);
+#endif
+int tftp_signal(int, sighandler_t, int);
 
 /*
  * A conservative estimate of the maximum number of decimal digits

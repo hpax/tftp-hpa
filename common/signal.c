@@ -11,6 +11,7 @@
  */
 
 #include "config.h"
+#include "tftpsubs.h"
 
 int tftp_signal(int signum, sighandler_t handler, int flags)
 {

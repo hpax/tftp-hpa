@@ -28,16 +28,19 @@
 
 /* Standard includes */
 
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
+#include <assert.h>
 #include <errno.h>
-#include <signal.h>
+#include <inttypes.h>
 #include <limits.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -47,20 +50,12 @@
 #include <sys/stat.h>
 #endif
 
-#ifdef HAVE_STRING_H
-#include <string.h>
-#endif
-
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
 #endif
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
-
-#ifdef HAVE_SETJMP_H
-#include <setjmp.h>
 #endif
 
 #ifdef HAVE_SYS_TIME_H
@@ -266,27 +261,27 @@ static inline void *mempcpy(void *dst, const void *src, size_t n)
 /* For a malloc()-like function which never returns NULL */
 #ifndef MALLOC_FUNC
 #ifdef __GNUC__
-#define MALLOC_FUNC __attribute__((malloc,returns_nonnull,alloc_size(1)))
+#define MALLOC_FUNC(x) __attribute__((malloc,returns_nonnull,alloc_size(x)))
 #else
-#define MALLOC_FUNC
+#define MALLOC_FUNC(x)
 #endif
 #endif
 
 /* For a calloc()-like function which never returns NULL */
 #ifndef CALLOC_FUNC
 #ifdef __GNUC__
-#define CALLOC_FUNC __attribute__((malloc,returns_nonnull,alloc_size(1,2)))
+#define CALLOC_FUNC(x,y) __attribute__((malloc,returns_nonnull,alloc_size(x,y)))
 #else
-#define CALLOC_FUNC
+#define CALLOC_FUNC(x,y)
 #endif
 #endif
 
-/* For a realloc function which never returns null */
+/* For a realloc() function which never returns null */
 #ifndef REALLOC_FUNC
 #ifdef __GNUC__
-#define REALLOC_FUNC __attribute__((returns_nonnull,alloc_size(2)))
+#define REALLOC_FUNC(x) __attribute__((returns_nonnull,alloc_size(x)))
 #else
-#define REALLOC_FUNC
+#define REALLOC_FUNC(x)
 #endif
 #endif
 
@@ -334,14 +329,6 @@ typedef long off_t;
 
 /* Prototypes for libxtra functions */
 
-#ifndef HAVE_SIGHANDLER_T
-typedef void (*sighandler_t)(int);
-#endif
-int tftp_signal(int, sighandler_t, int);
-
-#ifndef HAVE_DUP2
-int dup2(int, int);
-#endif
 #ifndef HAVE_DAEMON
 int daemon(int, int);
 #endif
