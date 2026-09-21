@@ -487,10 +487,10 @@ int main(int argc, char *argv[])
             copt.tsize = false;
             break;
         case 'N':
-            copt.no_options = false;
+            copt.no_options = true;
             break;
         case 'U':
-            copt.unsafe = false;
+            copt.unsafe = true;
             break;
         case 'h':
             if (optarg && *optarg)
