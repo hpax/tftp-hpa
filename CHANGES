@@ -8,6 +8,25 @@ Changes in 7.1:
 	block size on the MTU as obtained from the kernel (if
 	possible; otherwise the Ethernet MTU of 1500 is assumed.)
 
+	The tftp client will now reject reply packets received from an
+	address other than the targeted server. Use --unsafe (-U) to
+	override this behavior (required by some older TFTP servers
+	when multihomed.)
+
+	The tftp client now defaults to "--blocksize mtu --windowsize 64"
+	for better performance when the TFTP server supports these
+	options.
+
+	The tftp client now requests the "tsize" option from the
+	server and, if received, uses it to validate the length of the
+	received data file. Use the --no-tsize (-T) option to disable
+	this behavior.
+
+	The tftp client now has an option --no-options (-N) to disable
+	TFTP options entirely. No options will be requested from the
+	server. This is equivalent to
+	"--blocksize 512 --windowsize 1 --no-tsize".
+
 
 Changes in 7.0:
 	The memory footprint of the server has been optimized,
