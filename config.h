@@ -308,6 +308,19 @@ static inline void *mempcpy(void *dst, const void *src, size_t n)
 #endif
 #endif
 
+/* The max and min values of an integer type (assumes 2's complement) */
+#define IS_SIGNED(t)	((t)(-1) > (t)0)
+#define TYPE_MIN(t)	((t)((t)IS_SIGNED(t) << (sizeof(t)*CHAR_BIT - 1)))
+#define TYPE_MAX(t)	((t)(TYPE_MIN(t) - 1))
+
+/* off_t and OFF_T_MAX */
+#ifndef HAVE_OFF_T
+typedef long off_t;
+#endif
+#ifndef OFF_T_MAX
+#define OFF_T_MAX TYPE_MAX(off_t)
+#endif
+
 /* netinet/in.h, and possible missing pieces */
 #include <netinet/in.h>
 

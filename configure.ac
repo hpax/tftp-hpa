@@ -96,12 +96,14 @@ PA_ADD_HEADERS(netinet/in.h)
 PA_ADD_HEADERS(sys/uio.h)
 PA_ADD_HEADERS(netdb.h)
 
-AC_TYPE_OFF_T
 AC_TYPE_PID_T
 AC_TYPE_MODE_T
 AC_TYPE_SIZE_T
 AC_CHECK_TYPES(socklen_t)
 AC_CHECK_TYPES(sa_family_t)
+
+AC_TYPE_OFF_T
+AC_CHECK_DECLS(OFF_T_MAX)
 
 AC_SEARCH_LIBS(socket, [socket ws2_32 wsock32], ,
  [AC_MSG_ERROR(socket library not found)])

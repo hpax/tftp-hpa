@@ -38,6 +38,7 @@ struct daemon_options {
     bool reject_all_options;
     bool spec_umask;
     bool use_stderr;
+    uintmax_t max_upload;
     uintmax_t max_windowbytes;
     unsigned long rexmtval;
     int verbosity;

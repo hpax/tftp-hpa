@@ -32,7 +32,7 @@ struct formats {
     void (*f_send) (const struct formats *, struct tftphdr *, int,
                     const char *);
     void (*f_recv) (const struct formats *, struct tftphdr *, int,
-                    const char *);
+                    const char *, uintmax_t);
     bool f_convert;
 };
 

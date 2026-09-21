@@ -147,6 +147,13 @@ options are specified.
 Disable all upload functionality, no matter what the filesystem
 permissions are set to. All write requests will be denied immediately.
 .TP
+\fB\-\-max-upload\fP, \fB\-\-max-size\fP \fIsize\fP
+Limit uploads to at most \fIsize\fP bytes. A write request that includes
+an RFC 2349 \fBtsize\fP value greater than \fIsize\fP is denied immediately.
+Uploads without \fBtsize\fP, or whose data exceeds their specified
+\fBtsize\fP, are terminated with an error. A \fIsize\fP of zero is
+equivalent to \fB\-\-read-only\fP.
+.TP
 \fB\-s\fP, \fB\-\-secure\fP, \fB\-\-chroot\fP
 Change root directory on startup using
 .MR chroot 2 .
@@ -501,9 +508,10 @@ version of
 .B tftpd
 only supports the
 .B tsize
-option for binary (octet) mode transfers. The
-.B tsize
-option is accepted but ignored for upload (write) transactions.
+option for binary (octet) mode transfers. For upload (write)
+transactions, it is acknowledged unchanged and, if
+.B \-\-max-upload
+is specified, used to enforce the upload limit.
 .TP
 \fBtimeout\fP (RFC 2349)
 Set the time before the server retransmits a packet, in seconds.

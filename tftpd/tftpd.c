@@ -41,8 +41,25 @@
     defined(RESOLVE_IN_ROOT) && \
     defined(RESOLVE_NO_MAGICLINKS)
 #define WITH_JAIL 1
+struct unlink_info {
+    int parent;                 /* file descriptor to the directory */
+    char *filename;
+    char dirname[];
+};
+static struct unlink_info *unlink_info;
 #else
 #define WITH_JAIL 0
+static char *unlink_info;
+#endif
+
+#ifndef O_PATH
+#define O_PATH O_RDONLY
+#endif
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0
+#endif
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
 #endif
 
 #define	TIMEOUT 1000000         /* Default timeout (us) */
@@ -95,7 +112,8 @@ struct daemon_options dopt = {
     .map_steps = DAEMON_DEFAULT_MAP_STEPS,
     .waittime = -1,
     .service = "tftp",
-    .user = "nobody"
+    .user = "nobody",
+    .max_upload = OFF_T_MAX
 };
 
 struct common_options xopt = {
@@ -118,7 +136,7 @@ static size_t rewrite_macros(char macro, const char **output);
 static void rewrite_test(FILE *);
 
 #if WITH_JAIL
-static int jail_root = -1;
+static int jail_root = AT_FDCWD;
 #endif
 
 static char *normalize_path(char *name);
@@ -456,7 +474,8 @@ enum long_only_options {
     OPT_PATH_PREFIX,
     OPT_NORMALIZE,
     OPT_VALIDATE,
-    OPT_READONLY
+    OPT_READONLY,
+    OPT_MAX_UPLOAD
 };
 
 static const struct option long_options[] = {
@@ -499,6 +518,8 @@ static const struct option long_options[] = {
     { "validate",    0, NULL, OPT_VALIDATE },
     { "ro",          0, NULL, OPT_READONLY },
     { "read-only",   0, NULL, OPT_READONLY },
+    { "max-upload",  1, NULL, OPT_MAX_UPLOAD },
+    { "max-size",    1, NULL, OPT_MAX_UPLOAD },
     { NULL, 0, NULL, 0 }
 };
 static const char short_options[] = "46csjpvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
@@ -763,6 +784,19 @@ int main(int argc, char **argv)
         case OPT_READONLY:
             dopt.readonly = true;
             break;
+        case OPT_MAX_UPLOAD:
+        {
+            uintmax_t v;
+            errno = 0;
+            v = strtoumax(optarg, &ep, 10);
+            if (errno || *optarg == '\0' || *ep || v > (uintmax_t)OFF_T_MAX) {
+                tftpd_log(LOG_ERR, "Invalid maximum upload size: %s",
+                          optarg);
+                exit(EX_USAGE);
+            }
+            dopt.max_upload = v;
+            break;
+        }
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
             break;
@@ -774,6 +808,10 @@ int main(int argc, char **argv)
     /* Always validate when --secure or --jail are not used */
     if (!dopt.secure && !dopt.jail)
         dopt.validate = true;
+
+    /* If max_upload == 0, the server is readonly */
+    if (!dopt.max_upload)
+        dopt.readonly = true;
 
     if (!dopt.use_stderr)
         tftpd_openlog();
@@ -849,7 +887,7 @@ int main(int argc, char **argv)
         if (dopt.jail) {
             /* This uses openat2() partly as a test */
             static const struct open_how how = {
-                .flags   = O_RDONLY | O_DIRECTORY,
+                .flags   = O_PATH | O_DIRECTORY,
                 .resolve = RESOLVE_NO_MAGICLINKS
             };
             jail_root = openat2(AT_FDCWD, securepath, &how, sizeof how);
@@ -1255,7 +1293,7 @@ static int validate_access(const char *, int, const struct formats *,
 static void tftp_sendfile(const struct formats *, struct tftphdr *, int,
                           const char *);
 static void tftp_recvfile(const struct formats *, struct tftphdr *, int,
-                          const char *);
+                          const char *, uintmax_t);
 
 static const struct formats formats[] = {
     { "netascii", rewrite_access, validate_access,
@@ -1276,8 +1314,10 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     const char *filename;
     char *mode = NULL;
     const char *errmsgptr;
+    struct daemon_protocol_option *tsize_opt;
     const uint16_t tp_opcode = ntohs(tp->th_opcode);
     const bool is_read = tp_opcode == RRQ;
+    uintmax_t upload_limit;
     char *val = NULL, *opt = NULL;
     struct tftphdr *oack;
     size_t oacklen;
@@ -1314,40 +1354,6 @@ noreturn static void tftp(struct tftphdr *tp, int size)
             exit(0);
 
         found_format:
-	    file = NULL;
-            request_filename = xstrdup(origfilename);
-            if (!(filename = (*pf->f_rewrite)
-		  (pf, origfilename, tp_opcode, from.sa.sa_family, &errmsgptr))) {
-                nak(EACCESS, errmsgptr);        /* File denied by mapping rule */
-                exit(0);
-            }
-            if (dopt.verbosity >= 1) {
-                if (!strcmp(filename, origfilename)) {
-                    tftpd_log(LOG_NOTICE, "%s from %s filename %s",
-                              packet_type(tp_opcode), from_str, filename);
-                } else {
-                    tftpd_log(LOG_NOTICE,
-                           "%s from %s filename %s remapped to %s",
-                              packet_type(tp_opcode),
-                              from_str, origfilename,
-                              filename);
-                }
-            }
-	    /*
-	     * If "file" is already set, then a file was already validated
-	     * and opened during remap processing.
-	     */
-	    if (!file) {
-		ecode =
-		    (*pf->f_validate) (filename, tp_opcode, pf, &errmsgptr);
-		if (ecode == ENOTFOUND)
-		    tftpd_log(LOG_NOTICE, "%s: file not found: %s",
-			      from_str, filename);
-		if (ecode) {
-		    nak(ecode, errmsgptr);
-		    exit(0);
-		}
-	    }
             opt = ++cp;
         } else if (argn & 1) {
             val = ++cp;
@@ -1362,7 +1368,52 @@ noreturn static void tftp(struct tftphdr *tp, int size)
         exit(0);
     }
 
+    tsize_opt = &protocol_options[PO_TSIZE];
+    if (!is_read && (tsize_opt->flags & POF_REQ) &&
+        tsize_opt->val > dopt.max_upload) {
+        nak(EACCESS, "upload exceeds maximum size");
+        exit(0);
+    }
+
+    file = NULL;
+    request_filename = xstrdup(origfilename);
+    if (!(filename = (*pf->f_rewrite)
+          (pf, origfilename, tp_opcode, from.sa.sa_family, &errmsgptr))) {
+        nak(EACCESS, errmsgptr);        /* File denied by mapping rule */
+        exit(0);
+    }
+    if (dopt.verbosity >= 1) {
+        if (!strcmp(filename, origfilename)) {
+            tftpd_log(LOG_NOTICE, "%s from %s filename %s",
+                      packet_type(tp_opcode), from_str, filename);
+        } else {
+            tftpd_log(LOG_NOTICE, "%s from %s filename %s remapped to %s",
+                      packet_type(tp_opcode), from_str, origfilename,
+                      filename);
+        }
+    }
+    /*
+     * If "file" is already set, then a file was already validated
+     * and opened during remap processing.
+     */
+    if (!file) {
+        ecode = (*pf->f_validate)(filename, tp_opcode, pf, &errmsgptr);
+        if (ecode == ENOTFOUND)
+            tftpd_log(LOG_NOTICE, "%s: file not found: %s",
+                      from_str, filename);
+        if (ecode) {
+            nak(ecode, errmsgptr);
+            exit(0);
+        }
+    }
+
     oacklen = negotiate_options(&oack);
+    upload_limit = dopt.max_upload;
+    if (!is_read && (tsize_opt->flags & POF_REQ) &&
+        tsize_opt->val <= (uintmax_t)upload_limit) {
+        /* Enforce client-provided tsize */
+        upload_limit = tsize_opt->val;
+    }
 
     /* There are no more uses of the request packet after this point */
     xfree(tp);
@@ -1374,7 +1425,7 @@ noreturn static void tftp(struct tftphdr *tp, int size)
         (*pf->f_send) (pf, oack, oacklen, request_filename);
         break;
     case WRQ:
-        (*pf->f_recv) (pf, oack, oacklen, request_filename);
+        (*pf->f_recv) (pf, oack, oacklen, request_filename, upload_limit);
         break;
     default:
         /* This shouldn't happen... */
@@ -1923,16 +1974,20 @@ static const char *rewrite_access(const struct formats *pf,
  * "jail" are set.
  */
 static int validate_access(const char *filename, int mode,
-			   const struct formats *pf, const char **errmsg)
+			   const struct formats *pf,
+                           const char **errmsg)
 {
+    const bool is_read = mode == RRQ;
     struct stat stbuf;
-    int fd, omode, wmode, rmode;
+    int fd, omode;
     char *fnbuf = NULL;
     const char * const **dirp;
     char stdio_mode[3];
+    bool unlinkable;
 
     tsize.mode = TSIZE_NAK;
     *errmsg = NULL;
+    unlink_info = NULL;
 
     if (dopt.validate) {
         const char **pathlist = parse_path(filename, true);
@@ -1955,49 +2010,101 @@ static int validate_access(const char *filename, int mode,
         free(pathlist);
     }
 
+    tftpd_log(LOG_DEBUG, "%s: final filename: %s", from_str, filename);
+
     /*
      * We use different a different permissions scheme if `cancreate' is
      * set.
      */
-    wmode = O_WRONLY | (dopt.cancreate ? O_CREAT : 0) |
-        (pf->f_convert ? O_TEXT : O_BINARY);
-    rmode = O_RDONLY | (pf->f_convert ? O_TEXT : O_BINARY);
+    omode = pf->f_convert ? O_TEXT : O_BINARY;
+    if (is_read) {
+        omode |= O_RDONLY;
+        unlinkable = false;
+    } else {
+        omode |= O_WRONLY;
+        /* O_NOFOLLOW here prevents creating a file at the end of symlink */
+        if (dopt.cancreate)
+            omode |= O_CREAT | O_NOFOLLOW;
 #ifndef HAVE_FTRUNCATE
-    wmode |= O_TRUNC;		/* This really sucks on a dupe */
+        omode |= O_TRUNC;       /* This really sucks on a dupe */
 #endif
+        unlinkable = dopt.cancreate;
+    }
 
-    omode = mode == WRQ ? wmode : rmode;
-
-    tftpd_log(LOG_DEBUG, "%s: final filename: %s", from_str, filename);
-
+    fd = -1;
 #if WITH_JAIL
-    if (jail_root >= 0) {
+    {
+        int parent = jail_root;
+        const char *openname = filename;
         struct open_how how;
         memset(&how, 0, sizeof how);
+
+        if (parent != AT_FDCWD)
+            how.resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS;
+
+        if (unlinkable) {
+            size_t filename_len = strlen(filename);
+            size_t dirname_len;
+            struct unlink_info *uli;
+            const char *p;
+
+            /*
+             * This is messy because of the lack of an unlinkat2()
+             * system call, so if a file is created it might be necessary
+             * to have a directory file descriptor by which to unlink it...
+             */
+            how.flags = O_DIRECTORY | O_PATH;
+
+            unlink_info = uli = xmalloc(sizeof *uli + filename_len + 2);
+
+            p = strrchr(filename, '/');
+            p = p ? p+1 : filename; /* First character in the filename */
+            dirname_len = p - filename;
+            memcpy(uli->dirname, filename, dirname_len);
+            uli->dirname[dirname_len] = '\0';
+            uli->filename = uli->dirname + dirname_len + 1;
+            memcpy(uli->filename, p, filename_len - dirname_len + 1);
+
+            uli->parent = parent;
+            if (dirname_len) {
+                parent = openat2(parent, uli->dirname, &how, sizeof how);
+                if (parent < 0)
+                    goto open_failed;
+                uli->parent = parent;
+            }
+
+            openname = uli->filename;
+        }
+
         how.flags   = omode;
         how.mode    = (omode & O_CREAT) ? 0666 : 0;
-        how.resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS;
-        fd = openat2(jail_root, filename, &how, sizeof how);
-    } else
-#endif
+        fd = openat2(parent, openname, &how, sizeof how);
+    }
+#else
     {
+        if (unlinkable)
+            unlink_info = xstrdup(filename);
+
         fd = open(filename, omode, 0666);
     }
+#endif
+open_failed:
     if (fd < 0)
         fd = -errno;
-    if (fnbuf)
-        free(fnbuf);
-    if (fd < 0)
+    xfree(fnbuf);
+    if (fd < 0) {
+        xdelete(unlink_info);
         return fd;
+    }
 
     if (fstat(fd, &stbuf) < 0)
         exit(EX_OSERR);         /* This shouldn't happen */
 
     /* A duplicate RRQ or (worse!) WRQ packet could really cause havoc... */
-    if (lock_file(fd, mode != RRQ))
+    if (lock_file(fd, !is_read))
 	exit(0);                /* Assume a transfer is already underway */
 
-    if (mode == RRQ) {
+    if (is_read) {
         if (!dopt.unixperms && (stbuf.st_mode & (S_IREAD >> 6)) == 0) {
             close(fd);
             *errmsg = "File must have global read permissions";
@@ -2026,7 +2133,7 @@ static int validate_access(const char *filename, int mode,
         tsize.mode = TSIZE_WRITE;
     }
 
-    stdio_mode[0] = (mode == RRQ) ? 'r' : 'w';
+    stdio_mode[0] = is_read ? 'r' : 'w';
     stdio_mode[1] = (pf->f_convert) ? 't' : 'b';
     stdio_mode[2] = '\0';
 
@@ -2098,6 +2205,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
 
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
+    xfer.max_bytes = UINTMAX_MAX;
     xfer.rollover = rollover_val;
     xfer.resend_oack = false;
     xfer.control = &ack;
@@ -2137,9 +2245,65 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
 /*
  * Receive a file.
  */
+static void discard_upload(void)
+{
+    if (!dopt.cancreate) {
+        int fd = fileno(file);
+        if (fflush(file))
+            tftpd_log(LOG_WARNING, "%s: error flushing partial upload: %s",
+                      from_str, strerror(errno));
+        if (ftruncate(fd, 0))
+            tftpd_log(LOG_WARNING, "%s: error truncating partial upload: %s",
+                      from_str, strerror(errno));
+    }
+
+    if (fclose(file))
+        tftpd_log(LOG_WARNING, "%s: error closing partial upload: %s",
+                  from_str, strerror(errno));
+    file = NULL;
+
+    if (dopt.cancreate) {
+#if WITH_JAIL
+        if (unlinkat(unlink_info->parent, unlink_info->filename, 0)) {
+            tftpd_log(LOG_WARNING, "%s: error removing partial upload %s%s%s: %s",
+                      from_str,
+                      unlink_info->dirname,
+                      unlink_info->dirname[0] ? "/" : "",
+                      unlink_info->filename, strerror(errno));
+        }
+#else
+        if (unlink(unlink_info)) {
+            tftpd_log(LOG_WARNING, "%s: error removing partial upload %s: %s",
+                      from_str, unlink_info, strerror(errno));
+        }
+#endif
+    }
+}
+
+static void commit_upload(void)
+{
+    if (fclose(file))
+        tftpd_log(LOG_WARNING, "%s: error closing uploaded file: %s",
+                  from_str, strerror(errno));
+    file = NULL;
+}
+
+static void unlink_info_cleanup(void)
+{
+    if (!unlink_info)
+        return;
+
+#if WITH_JAIL
+    if (unlink_info->parent != jail_root)
+        close(unlink_info->parent);
+#endif
+
+    xdelete(unlink_info);
+}
+
 static void tftp_recvfile(const struct formats *pf,
-			  struct tftphdr *oack, int oacklen,
-                          const char *filename)
+                          struct tftphdr *oack, int oacklen,
+                          const char *filename, uintmax_t max_upload)
 {
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;
@@ -2149,6 +2313,8 @@ static void tftp_recvfile(const struct formats *pf,
     struct tftp_io * volatile io = NULL;
     struct tftphdr *datapkt;
     size_t datapktsize;
+
+    result.status = TFTP_XFER_WRITE_ERROR;
 
     if (oack) {
         initial_reply = oack;
@@ -2170,6 +2336,7 @@ static void tftp_recvfile(const struct formats *pf,
 
     xfer.blocksize = segsize;
     xfer.windowsize = windowsize;
+    xfer.max_bytes = max_upload;
     xfer.rollover = rollover_val;
     xfer.resend_oack = false;
     xfer.control = NULL;
@@ -2191,6 +2358,9 @@ static void tftp_recvfile(const struct formats *pf,
     case TFTP_XFER_BAD_DATA:
         nak(EBADOP, "data packet too large");
         break;
+    case TFTP_XFER_SIZE_EXCEEDED:
+        nak(EACCESS, "upload exceeds maximum size");
+        break;
     case TFTP_XFER_WRITE_ERROR:
         nak(-result.error, NULL);
         break;
@@ -2211,19 +2381,16 @@ static void tftp_recvfile(const struct formats *pf,
 
     tftp_io_stop(io);
     io = NULL;
-    if (result.status != TFTP_XFER_OK)
-        goto out;
 
-    (void)fclose(file);
-    file = NULL;
-    daemon_xfer_dally(result.last_block);
-  out:
-    tftp_io_stop(io);
-    if (file) {
-        (void)fclose(file);
-        file = NULL;
+out:
+    if (result.status != TFTP_XFER_OK) {
+        discard_upload();
+    } else {
+        commit_upload();
+        daemon_xfer_dally(result.last_block);
     }
-    return;
+
+    unlink_info_cleanup();
 }
 
 /*

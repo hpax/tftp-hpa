@@ -33,6 +33,16 @@ Changes in 7.1:
 	The server now has a --read-only option to unconditionally
 	refuse all write requests.
 
+	The server now has a --max-upload option to limit the maximum
+	size of a file accepted for upload.
+
+	If --create is specified, the server will now delete a failed
+	upload file.
+
+	If --create a specified, if the host operating system support
+	O_NOFOLLOW, the server will not permit a file to be written to
+	through a symbolic link.
+
 
 Changes in 7.0:
 	The memory footprint of the server has been optimized,

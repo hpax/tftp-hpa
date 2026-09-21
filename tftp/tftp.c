@@ -377,6 +377,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode)
     xzero(xfer);
     xfer.blocksize = optack.blksize;
     xfer.windowsize = optack.window;
+    xfer.max_bytes = UINTMAX_MAX;
     xfer.resend_oack = optack.window; /* THIS CAN'T BE RIGHT CHECK AGAIN */
     xfer.control = response;
     xfer.control_size = TFTP_REPLY_MAX_PACKET_SIZE;
@@ -548,6 +549,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode)
     xzero(xfer);
     xfer.blocksize = optack.blksize;
     xfer.windowsize = optack.window;
+    xfer.max_bytes = UINTMAX_MAX;
     xfer.context = &context;
     xfer.ops = &client_xfer_ops;
     xfer.io_context = io;

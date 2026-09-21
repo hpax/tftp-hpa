@@ -18,6 +18,7 @@ enum tftp_xfer_status {
     TFTP_XFER_READ_ERROR,
     TFTP_XFER_WRITE_ERROR,
     TFTP_XFER_BAD_DATA,
+    TFTP_XFER_SIZE_EXCEEDED,
     TFTP_XFER_PEER_ERROR
 };
 
@@ -71,6 +72,8 @@ struct tftp_xfer {
     unsigned int blocksize;
     /* Negotiated number of DATA packets acknowledged as a window. */
     unsigned int windowsize;
+    /* Maximum total DATA bytes accepted during a receive transfer. */
+    uintmax_t max_bytes;
     /* Block number to use after the 16-bit sequence number wraps. */
     uint16_t rollover;
     /* Resend a received OACK by retransmitting the current send window. */

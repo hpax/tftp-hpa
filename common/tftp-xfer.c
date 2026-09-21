@@ -299,6 +299,10 @@ void tftp_xfer_recv(const struct tftp_xfer *xfer,
             return;
         }
         size = n - 4;
+        if ((uintmax_t)size > xfer->max_bytes - bytes) {
+            finish(xfer, result, TFTP_XFER_SIZE_EXCEEDED, 0, bytes);
+            return;
+        }
         memcpy(dp, packet, (size_t)n);
         if (xfer->io_ops->write_publish(xfer->io_context, size) < 0) {
             if (!errno)
