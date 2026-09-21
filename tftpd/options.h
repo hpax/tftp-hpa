@@ -26,6 +26,7 @@ enum normalizations {
 };
 
 struct daemon_options {
+    bool readonly;
     bool cancreate;
     bool secure;
     bool jail;
@@ -34,7 +35,6 @@ struct daemon_options {
     bool standalone;
     bool nodaemon;
     bool systemd;
-    bool mtu;
     bool reject_all_options;
     bool spec_umask;
     bool use_stderr;

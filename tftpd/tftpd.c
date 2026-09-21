@@ -455,7 +455,8 @@ enum long_only_options {
     OPT_REJECT_ALL,
     OPT_PATH_PREFIX,
     OPT_NORMALIZE,
-    OPT_VALIDATE
+    OPT_VALIDATE,
+    OPT_READONLY
 };
 
 static const struct option long_options[] = {
@@ -496,6 +497,8 @@ static const struct option long_options[] = {
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { "normalize",   2, NULL, OPT_NORMALIZE },
     { "validate",    0, NULL, OPT_VALIDATE },
+    { "ro",          0, NULL, OPT_READONLY },
+    { "read-only",   0, NULL, OPT_READONLY },
     { NULL, 0, NULL, 0 }
 };
 static const char short_options[] = "46csjpvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
@@ -756,6 +759,9 @@ int main(int argc, char **argv)
             break;
         case OPT_VALIDATE:
             dopt.validate = true;
+            break;
+        case OPT_READONLY:
+            dopt.readonly = true;
             break;
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
@@ -1270,10 +1276,16 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     const char *filename;
     char *mode = NULL;
     const char *errmsgptr;
-    uint16_t tp_opcode = ntohs(tp->th_opcode);
+    const uint16_t tp_opcode = ntohs(tp->th_opcode);
+    const bool is_read = tp_opcode == RRQ;
     char *val = NULL, *opt = NULL;
     struct tftphdr *oack;
     size_t oacklen;
+
+    if (dopt.readonly && !is_read) {
+        nak(EACCESS, "server is readonly");
+        exit(0);
+    }
 
     origfilename = cp = (char *)&(tp->th_stuff);
     argn = 0;
@@ -1286,7 +1298,7 @@ noreturn static void tftp(struct tftphdr *tp, int size)
         } while (cp < end && *cp);
 
         if (cp == end) {
-            nak(EBADOP, "Request not null-terminated");
+            nak(EBADOP, "request not null-terminated");
             exit(0);
         }
 
@@ -1298,7 +1310,7 @@ noreturn static void tftp(struct tftphdr *tp, int size)
                 if (ascii_strcaseeq(pf->f_mode, mode))
                     goto found_format;
             }
-            nak(EBADOP, "Unknown mode");
+            nak(EBADOP, "unknown mode");
             exit(0);
 
         found_format:
@@ -1312,12 +1324,11 @@ noreturn static void tftp(struct tftphdr *tp, int size)
             if (dopt.verbosity >= 1) {
                 if (!strcmp(filename, origfilename)) {
                     tftpd_log(LOG_NOTICE, "%s from %s filename %s",
-                              tp_opcode == WRQ ? "WRQ" : "RRQ",
-                              from_str, filename);
+                              packet_type(tp_opcode), from_str, filename);
                 } else {
                     tftpd_log(LOG_NOTICE,
                            "%s from %s filename %s remapped to %s",
-                              tp_opcode == WRQ ? "WRQ" : "RRQ",
+                              packet_type(tp_opcode),
                               from_str, origfilename,
                               filename);
                 }
@@ -1347,7 +1358,7 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     }
 
     if (!pf) {
-        nak(EBADOP, "Missing mode");
+        nak(EBADOP, "missing mode");
         exit(0);
     }
 
@@ -1356,12 +1367,19 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     /* There are no more uses of the request packet after this point */
     xfree(tp);
 
-    tftp_set_socket_buffers(peer, segsize, windowsize, tp_opcode == RRQ);
+    tftp_set_socket_buffers(peer, segsize, windowsize, is_read);
 
-    if (tp_opcode == RRQ)
+    switch (tp_opcode) {
+    case RRQ:
         (*pf->f_send) (pf, oack, oacklen, request_filename);
-    else
+        break;
+    case WRQ:
         (*pf->f_recv) (pf, oack, oacklen, request_filename);
+        break;
+    default:
+        /* This shouldn't happen... */
+        break;
+    }
 
     exit(0);                    /* Request completed */
 }
@@ -2171,7 +2189,7 @@ static void tftp_recvfile(const struct formats *pf,
 
     switch (result.status) {
     case TFTP_XFER_BAD_DATA:
-        nak(EBADOP, "Data packet too large");
+        nak(EBADOP, "data packet too large");
         break;
     case TFTP_XFER_WRITE_ERROR:
         nak(-result.error, NULL);

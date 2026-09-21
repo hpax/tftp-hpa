@@ -143,6 +143,10 @@ or
 .B \-\-umask
 options are specified.
 .TP
+\fB\-\-ro\fP, \fB\-\-read-only\fP
+Disable all upload functionality, no matter what the filesystem
+permissions are set to. All write requests will be denied immediately.
+.TP
 \fB\-s\fP, \fB\-\-secure\fP, \fB\-\-chroot\fP
 Change root directory on startup using
 .MR chroot 2 .
@@ -806,6 +810,12 @@ option is specified.  Note that this extends the concept of ``public''
 to include all users on all hosts that can be reached through the
 network; this may not be appropriate on all systems, and its
 implications should be considered before enabling TFTP service.
+.PP
+If there is no need for the server to accept write (upload) requests,
+it is a good idea to specify the
+.B \-\-read-only
+command line option to prevent any accidental setting of filesystem
+permissions to inadvertently allow uploads.
 .PP
 It is strongly recommended to use some kind of firewall or
 packet-filter solution to restrict access to the TFTP port. TFTP only

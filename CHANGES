@@ -30,6 +30,9 @@ Changes in 7.1:
 	The server now has an option --validate to force path name
 	validation even if --secure or --jail is used.
 
+	The server now has a --read-only option to unconditionally
+	refuse all write requests.
+
 
 Changes in 7.0:
 	The memory footprint of the server has been optimized,
