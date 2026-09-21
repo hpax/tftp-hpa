@@ -64,6 +64,7 @@ struct tftphdr {
 enum protocol_option_enum {
     PO_BLKSIZE,
     PO_BLKSIZE2,
+    PO_COOKIE,
     PO_ROLLOVER,
     PO_TIMEOUT,
     PO_TSIZE,
@@ -72,5 +73,8 @@ enum protocol_option_enum {
 
     PO_NUM_OPTS
 };
+
+/* Maximum size of a TFTP request cookie */
+#define TFTP_MAX_COOKIE	255
 
 #endif /* TFTP_TFTP_H */

@@ -535,6 +535,21 @@ default and recommended value is 0, but some clients expect 1 instead.
 This version of
 .B tftpd
 only accepts 0 and 1 as valid rollover values.
+.TP
+\fBcookie\fP (nonstandard)
+The
+.B cookie
+option accepts an arbitrary string of up to 255 bytes, and echoes it
+back to the client as part of the reply (OACK) packet. The cookie
+string can be used:
+.IP "1." 4n
+By the client, to identify that the reply packet matches the request
+packet. Standard TFTP makes this difficult, because the TFTP server
+normally returns the initial response using a different port number,
+and under some circumstances even a different IP address.
+.IP "2." 4n
+By the server, to detect duplicate reception (due to retransmission)
+of request packets, as opposed to a new transmission session.
 .PP
 The
 .B \-\-refuse

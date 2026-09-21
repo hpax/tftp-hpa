@@ -205,6 +205,22 @@ static inline int tftp_sigmask(int how, const sigset_t *set, sigset_t *oset)
 #endif
 }
 
+/*
+ * Functions similar to <ctype.h>, but valid only for the ASCII range.
+ * These functions can be used when processing the protocol data, as
+ * opposed to arbitrary strings in order in order to avoid the overhead
+ * (and potential problems!) of locale-aware functions.
+ */
+static inline unsigned char ascii_digitval(unsigned char c)
+{
+    return c - '0';
+}
+
+static inline bool ascii_isdigit(unsigned char c)
+{
+    return ascii_digitval(c) <= 9;
+}
+
 static inline unsigned char ascii_tolower(unsigned char c)
 {
     if ((unsigned char)(c - 'A') <= (unsigned char)('Z' - 'A'))

@@ -148,7 +148,7 @@ noreturn static void tftp(struct tftphdr *tp, int n);
 
 static void nak(int, const char *);
 static void timer(int);
-static void parse_option(const char *, const char *);
+static void parse_option(const char *opt, const char *val, size_t len);
 static size_t negotiate_options(struct tftphdr **tpp);
 static unsigned int io_ring_slots(void);
 static bool io_is_threaded(void);
@@ -160,26 +160,57 @@ enum protocol_option_flags {
     POF_ACK    = 4              /* Option to be granted */
 };
 
-struct daemon_protocol_option {
-    const char * const name;    /* Canonical name */
-    const unsigned int nsize;   /* Size of the name string including NUL */
-    enum protocol_option_flags flags;
-    const char *client_name;    /* Name as used by client */
-    uintmax_t val;		/* Requested/accepted value */
+enum otype {
+    POT_UINT,                   /* Unsigned integer */
+    POT_STR,                    /* Arbitrary string */
 };
 
-#define POPT(n) { n, sizeof(n), POF_NONE, NULL, 0 }
+struct daemon_protocol_option {
+    const char * const name;    /* Canonical name */
+    const uint8_t nsize;	/* Size of the name string including NUL */
+    const uint8_t otype;        /* Option type */
+    uint16_t dsize;             /* Option data length, including NUL */
+    enum protocol_option_flags flags;
+    const char *client_name;    /* Pointer to name in request buffer */
+    uintmax_t uint;             /* Numeric value */
+    char *str;                  /* Data as string, on heap */
+};
+
+#define UOPT(n) { n, sizeof(n), POT_UINT, 0, POF_NONE, NULL, 0, NULL }
+#define SOPT(n) { n, sizeof(n), POT_STR , 0, POF_NONE, NULL, 0, NULL }
 
 /* Keep this in sync with enum protocol_options_enum in common/tftp.h */
 static struct daemon_protocol_option protocol_options[PO_NUM_OPTS] = {
-    [PO_BLKSIZE]	= POPT("blksize"),
-    [PO_BLKSIZE2]	= POPT("blksize2"),
-    [PO_ROLLOVER]	= POPT("rollover"),
-    [PO_TIMEOUT]	= POPT("timeout"),
-    [PO_TSIZE]		= POPT("tsize"),
-    [PO_UTIMEOUT]	= POPT("utimeout"),
-    [PO_WINDOWSIZE]	= POPT("windowsize")
+    [PO_BLKSIZE]	= UOPT("blksize"),
+    [PO_BLKSIZE2]	= UOPT("blksize2"),
+    [PO_COOKIE]		= SOPT("cookie"),
+    [PO_ROLLOVER]	= UOPT("rollover"),
+    [PO_TIMEOUT]	= UOPT("timeout"),
+    [PO_TSIZE]		= UOPT("tsize"),
+    [PO_UTIMEOUT]	= UOPT("utimeout"),
+    [PO_WINDOWSIZE]	= UOPT("windowsize")
 };
+
+/*
+ * Returns a pointer to the option structure if it was requested
+ * by the client and not configured to be refused.
+ */
+static inline struct daemon_protocol_option *
+opt_requested(enum protocol_option_enum opt)
+{
+    struct daemon_protocol_option *po = &protocol_options[opt];
+
+    if ((po->flags & (POF_REQ|POF_REFUSE)) == POF_REQ)
+        return po;
+    else
+        return NULL;
+}
+
+static inline bool opt_granted(const struct daemon_protocol_option *po)
+{
+    /* The options must have been both requested and acknowledgeable */
+    return (po->flags & (POF_ACK|POF_REQ|POF_REFUSE)) == (POF_ACK|POF_REQ);
+}
 
 /* Signal handlers: just set a variable and return */
 static volatile sig_atomic_t reload_signal = 0;
@@ -1314,10 +1345,9 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     const char *filename;
     char *mode = NULL;
     const char *errmsgptr;
-    struct daemon_protocol_option *tsize_opt;
     const uint16_t tp_opcode = ntohs(tp->th_opcode);
     const bool is_read = tp_opcode == RRQ;
-    uintmax_t upload_limit;
+    uintmax_t upload_limit = 0;
     char *val = NULL, *opt = NULL;
     struct tftphdr *oack;
     size_t oacklen;
@@ -1358,7 +1388,7 @@ noreturn static void tftp(struct tftphdr *tp, int size)
         } else if (argn & 1) {
             val = ++cp;
         } else {
-            parse_option(opt, val);
+            parse_option(opt, val, cp-val);
             opt = ++cp;
         }
     }
@@ -1368,11 +1398,23 @@ noreturn static void tftp(struct tftphdr *tp, int size)
         exit(0);
     }
 
-    tsize_opt = &protocol_options[PO_TSIZE];
-    if (!is_read && (tsize_opt->flags & POF_REQ) &&
-        tsize_opt->val > dopt.max_upload) {
-        nak(EACCESS, "upload exceeds maximum size");
-        exit(0);
+    if (!is_read) {
+        /*
+         * If the client sent us tsize, verify up front that the upload is not
+         * too big, and cap the upload size to match the tsize.
+         */
+        const struct daemon_protocol_option *tsize_opt;
+
+        upload_limit = dopt.max_upload;
+        tsize_opt = opt_requested(PO_TSIZE);
+        if (tsize_opt) {
+            if (tsize_opt->uint > upload_limit) {
+                nak(EACCESS, "upload exceeds maximum size");
+                exit(0);
+            } else {
+                upload_limit = tsize_opt->uint;
+            }
+        }
     }
 
     file = NULL;
@@ -1408,12 +1450,6 @@ noreturn static void tftp(struct tftphdr *tp, int size)
     }
 
     oacklen = negotiate_options(&oack);
-    upload_limit = dopt.max_upload;
-    if (!is_read && (tsize_opt->flags & POF_REQ) &&
-        tsize_opt->val <= (uintmax_t)upload_limit) {
-        /* Enforce client-provided tsize */
-        upload_limit = tsize_opt->val;
-    }
 
     /* There are no more uses of the request packet after this point */
     xfree(tp);
@@ -1472,54 +1508,49 @@ static bool io_is_threaded(void)
  * Parse an RFC2347 option; we limit the arguments to positive
  * integers which matches all our current options.
  */
-static void parse_option(const char *opt, const char *val)
+static void parse_option(const char *opt, const char *val, size_t vlen)
 {
-    char *vend;
-    uintmax_t v;
     struct daemon_protocol_option *po;
 
     /* Global option-parsing variables initialization */
-    if (!*opt || !*val)
+    if (!*opt || !vlen)
         return;
-
-    errno = 0;
-    v = strtoumax(val, &vend, 10);
-    if (*vend || errno == ERANGE)
-	return;                 /* Invalid string */
 
     ARRAY_FOREACH(po, protocol_options) {
         if (ascii_strcaseeq(po->name, opt)) {
-            po->flags |= POF_REQ;
-            po->val = v;
             /*
              * Save the name in the same case as the client sent;
              * it's not supposed to matter but broken TFTP clients abound.
              */
             po->client_name = opt;
-            break;
+
+            switch (po->otype) {
+            case POT_UINT:
+            {
+                uintmax_t v;
+                char *vend;
+                if (!ascii_isdigit(val[0]))
+                    return;		/* Invalid or signed number */
+                errno = 0;
+                v = strtoumax(val, &vend, 10);
+                if (vend != val + vlen || errno)
+                    return;		/* Invalid number */
+
+                po->uint = v;
+                break;
+            }
+            case POT_STR:
+                break;
+            default:
+                return;         /* Invalid type, should not happen */
+            }
+
+            xfree(po->str);
+            po->str = xmemdup(val, po->dsize = vlen + 1);
+            po->flags |= POF_REQ;
+            return;
         }
     }
-}
-
-/*
- * Returns a pointer to the option structure if it was requested
- * by the client and not configured to be refused.
- */
-static inline struct daemon_protocol_option *
-opt_requested(enum protocol_option_enum opt)
-{
-    struct daemon_protocol_option *po = &protocol_options[opt];
-
-    if ((po->flags & (POF_REQ|POF_REFUSE)) == POF_REQ)
-        return po;
-    else
-        return NULL;
-}
-
-static inline bool opt_granted(const struct daemon_protocol_option *po)
-{
-    /* The options must have been both requested and acknowledgeable */
-    return (po->flags & (POF_ACK|POF_REQ|POF_REFUSE)) == (POF_ACK|POF_REQ);
 }
 
 /*
@@ -1536,15 +1567,15 @@ static void negotiate_blksize(void)
     max_blksize = tftp_max_blksize(peer, &from);
 
     if (blk2) {
-        if (blk2->val < MIN_SEGSIZE) {
+        if (blk2->uint < MIN_SEGSIZE) {
             blk2 = NULL;
         } else {
             unsigned int lb;
 
-            if (blk2->val > max_blksize)
+            if (blk2->uint > max_blksize)
                 blksize = max_blksize;
             else
-                blksize = blk2->val;
+                blksize = blk2->uint;
 
             /* Round down to a power of 2 */
             while ((lb = blksize & (blksize - 1)))
@@ -1552,15 +1583,15 @@ static void negotiate_blksize(void)
         }
     }
     if (blk) {
-        if (blk->val < MIN_SEGSIZE) {
+        if (blk->uint < MIN_SEGSIZE) {
             blk = NULL;
         } else {
-            if (blk->val > max_blksize) {
+            if (blk->uint > max_blksize) {
                 blksize = max_blksize;
-            } else if (blksize > blk->val) {
+            } else if (blksize > blk->uint) {
                 blk = NULL;		/* blksize2 wins, reject blksize */
             } else {
-                blksize = blk->val;
+                blksize = blk->uint;
             }
         }
     }
@@ -1570,14 +1601,14 @@ static void negotiate_blksize(void)
 
     if (blk) {
         blk->flags |= POF_ACK;
-        blk->val    = blksize;
+        blk->uint    = blksize;
     }
 
     if (blksize & (blksize - 1)) {
         blk2 = NULL;            /* Not a power of 2 */
     } else if (blk2) {
         blk2->flags |= POF_ACK;
-        blk2->val    = blksize;
+        blk2->uint    = blksize;
     }
 
     if (!blk && !blk2)
@@ -1591,18 +1622,18 @@ static void negotiate_windowsize(void)
     struct daemon_protocol_option *ws = opt_requested(PO_WINDOWSIZE);
     unsigned int window = 1;
 
-    if (ws && ws->val > 1) {
-        if (ws->val > xopt.max_windowsize)
+    if (ws && ws->uint > 1) {
+        if (ws->uint > xopt.max_windowsize)
             window = xopt.max_windowsize;
         else
-            window = ws->val;
+            window = ws->uint;
 
         if ((uintmax_t)window * segsize > dopt.max_windowbytes)
             window = dopt.max_windowbytes / (uintmax_t)segsize;
 
         if (window > 1) {
             ws->flags |= POF_ACK;
-            ws->val    = window;
+            ws->uint    = window;
         } else {
             window = 1;
         }
@@ -1628,14 +1659,14 @@ static void negotiate_tsize(void)
          * requires that the option value is 0, so refuse the option
          * if the value is anything else.
          */
-        if (!ts->val) {
-            ts->val = tsize.size;
+        if (!ts->uint) {
+            ts->uint = tsize.size;
             ts->flags |= POF_ACK;
         }
         break;
     case TSIZE_WRITE:
         /* WRQ: echo back the tsize specified. */
-        tsize.size = ts->val;
+        tsize.size = ts->uint;
         ts->flags |= POF_ACK;
         break;
     default:
@@ -1656,14 +1687,14 @@ static void negotiate_timeout(void)
     unsigned long tos_us = 0;
 
     if (tos) {
-        if (tos->val < MIN_TIMEOUT_SEC || tos->val > MAX_TIMEOUT_SEC) {
+        if (tos->uint < MIN_TIMEOUT_SEC || tos->uint > MAX_TIMEOUT_SEC) {
             tos = NULL;
         } else {
-            to = tos_us = tos->val * USEC_PER_SEC;
+            to = tos_us = tos->uint * USEC_PER_SEC;
         }
     }
     if (tou) {
-        if (tou->val < MIN_TIMEOUT || tou->val > MAX_TIMEOUT) {
+        if (tou->uint < MIN_TIMEOUT || tou->uint > MAX_TIMEOUT) {
             tou = NULL;
         } else {
             /*
@@ -1671,7 +1702,7 @@ static void negotiate_timeout(void)
              * timeout if and only if it is the same value as
              * utimeout.
              */
-            to = tou->val;
+            to = tou->uint;
             if (tos_us != to)
                 tos = NULL;
         }
@@ -1686,12 +1717,20 @@ static void negotiate_rollover(void)
 {
     struct daemon_protocol_option *ro = opt_requested(PO_ROLLOVER);
 
-    if (ro && ro->val <= 1) {
-        rollover_val = ro->val;
+    if (ro && ro->uint <= 1) {
+        rollover_val = ro->uint;
         ro->flags |= POF_ACK;
     } else {
         rollover_val = 0;
     }
+}
+
+static void negotiate_cookie(void)
+{
+    struct daemon_protocol_option *po = opt_requested(PO_COOKIE);
+
+    if (po && po->dsize <= TFTP_MAX_COOKIE+1)
+        po->flags |= POF_ACK;
 }
 
 /*
@@ -1701,14 +1740,27 @@ static void negotiate_rollover(void)
  */
 static size_t build_oack(struct tftphdr **tpp)
 {
-    const struct daemon_protocol_option *po;
+    struct daemon_protocol_option *po;
     struct tftphdr *tp;
     char *p;
     size_t bufsize = 0;
 
     ARRAY_FOREACH(po, protocol_options) {
-        if (opt_granted(po))
-            bufsize += po->nsize + DIGIT_SPACE(po->val) + 1;
+        if (opt_granted(po)) {
+            switch (po->otype) {
+            case POT_UINT:
+                /* Update the option data buffer */
+                xfree(po->str);
+                po->dsize = xasprintf(&po->str, "%"PRIu64, po->uint) + 1;
+                break;
+            default:
+                break;
+            }
+            bufsize += po->nsize + po->dsize;
+        } else {
+            /* This option was never granted, so no need to carry its data */
+            xdelete(po->str);
+        }
     }
 
     if (!bufsize) {
@@ -1724,8 +1776,7 @@ static size_t build_oack(struct tftphdr **tpp)
     ARRAY_FOREACH(po, protocol_options) {
         if (opt_granted(po)) {
             p = mempcpy(p, po->client_name, po->nsize);
-            p += snprintf(p, DIGIT_SPACE(po->val)+1, "%"PRIuMAX, po->val);
-            p++;
+            p = mempcpy(p, po->str, po->dsize);
         }
     }
 
@@ -1744,6 +1795,7 @@ static size_t negotiate_options(struct tftphdr **tpp)
     negotiate_tsize();
     negotiate_timeout();
     negotiate_rollover();
+    negotiate_cookie();
 
     return build_oack(tpp);
 }
