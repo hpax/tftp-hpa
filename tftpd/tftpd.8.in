@@ -159,7 +159,9 @@ Note that when
 is used, none of the path name checks
 described under
 .I "PATH VALIDATION"
-below are performed; any desired checks will have to be implemented
+below are performed unless
+.B \-\-validate
+is also specified; any desired checks will have to be implemented
 using explicit remap rules.
 .IP
 Using
@@ -199,8 +201,19 @@ Note that when
 is used, none of the path name checks
 described under
 .I "PATH VALIDATION"
-below are performed; any desired checks will have to be implemented
+below are performed unless
+.B \-\-validate
+is also specified; any desired checks will have to be implemented
 using explicit remap rules.
+.TP
+\fB\-\-validate\fP
+Perform path validation even if
+.B \-\-secure
+or
+.B \-\-jail
+are used. Normally path validation is only performed when neither of
+those options are specified. See
+.I "PATH VALIDATION" below.
 .TP
 \fB\-\-path-prefix\fP \fIprefix\fP
 Prepends \fIprefix\fP to the local filesystem path
@@ -544,7 +557,9 @@ or
 .B \-\-jail
 options are
 .I not
-used, path validation. See "PATH VALIDATION" below.
+used, or the
+.B \-\-validate
+option is specified, path validation. See "PATH VALIDATION" below.
 .IP "4." 4n
 If the
 .B \-\-path-prefix
@@ -725,9 +740,13 @@ If the
 .B \-\-secure
 or
 .B \-\-jail
-flags are
+options are
 .I not
-given on the command line,
+given on the command line, or the
+.B \-\-validate
+option
+.I is
+given,
 .B tftpd
 will perform the following validation and canonicalization of the final path
 name, before verifying that the path falls inside one of the

@@ -455,7 +455,7 @@ enum long_only_options {
     OPT_REJECT_ALL,
     OPT_PATH_PREFIX,
     OPT_NORMALIZE,
-    OPT_MTU
+    OPT_VALIDATE
 };
 
 static const struct option long_options[] = {
@@ -495,6 +495,7 @@ static const struct option long_options[] = {
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { "normalize",   2, NULL, OPT_NORMALIZE },
+    { "validate",    0, NULL, OPT_VALIDATE },
     { NULL, 0, NULL, 0 }
 };
 static const char short_options[] = "46csjpvVlLa:B:W:u:U:r:t:T:R:S:m:P:";
@@ -753,6 +754,9 @@ int main(int argc, char **argv)
         case OPT_NORMALIZE:
             dopt.normalize = parse_normalize(optarg);
             break;
+        case OPT_VALIDATE:
+            dopt.validate = true;
+            break;
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
             break;
@@ -760,6 +764,10 @@ int main(int argc, char **argv)
 
     rexmtval = timeout = dopt.rexmtval;
     maxtimeout = rexmtval * TIMEOUT_LIMIT;
+
+    /* Always validate when --secure or --jail are not used */
+    if (!dopt.secure && !dopt.jail)
+        dopt.validate = true;
 
     if (!dopt.use_stderr)
         tftpd_openlog();
@@ -793,8 +801,7 @@ int main(int argc, char **argv)
     patherr = false;
     for (dopt.ndirs = 0; optind != argc; optind++) {
         const char *path = argv[optind];
-        const char * const *pathlist =
-            parse_path(path, !dopt.secure && !dopt.jail);
+        const char * const *pathlist = parse_path(path, dopt.validate);
         if (!pathlist) {
             tftpd_log(LOG_ERR, "invalid directory path: %s", path);
             patherr = true;
@@ -1892,8 +1899,10 @@ static const char *rewrite_access(const struct formats *pf,
  *
  * This function is also responsible for canonicalizing file paths.
  *
- * If "secure" or "jail" is set the file path is used as-is, as the
- * kernel is expected to enforce any namespace restrictions.
+ * If "validate" is not set, the file path is used as-is, and kernel
+ * is expected to enforce any namespace restrictions.  "validate" is
+ * forced set after command line parsing if neither "secure" nor
+ * "jail" are set.
  */
 static int validate_access(const char *filename, int mode,
 			   const struct formats *pf, const char **errmsg)
@@ -1907,7 +1916,7 @@ static int validate_access(const char *filename, int mode,
     tsize.mode = TSIZE_NAK;
     *errmsg = NULL;
 
-    if (!dopt.secure && !dopt.jail) {
+    if (dopt.validate) {
         const char **pathlist = parse_path(filename, true);
 
         if (!pathlist) {

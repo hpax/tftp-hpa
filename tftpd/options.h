@@ -29,6 +29,7 @@ struct daemon_options {
     bool cancreate;
     bool secure;
     bool jail;
+    bool validate;
     bool unixperms;
     bool standalone;
     bool nodaemon;
