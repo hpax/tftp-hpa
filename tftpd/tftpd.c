@@ -1686,7 +1686,7 @@ static void negotiate_rollover(void)
 {
     struct daemon_protocol_option *ro = opt_requested(PO_ROLLOVER);
 
-    if (ro && ro->val <= 65535) {
+    if (ro && ro->val <= 1) {
         rollover_val = ro->val;
         ro->flags |= POF_ACK;
     } else {

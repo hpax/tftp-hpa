@@ -530,8 +530,11 @@ on the specific acknowledgement packets received from the client.
 .TP
 \fBrollover\fP (nonstandard)
 Set the block number to resume at after a block number rollover.  The
-default and recommended value is 0, but some clients expect another
-value, typically 1.
+default and recommended value is 0, but some clients expect 1 instead.
+.PP
+This version of
+.B tftpd
+only accepts 0 and 1 as valid rollover values.
 .PP
 The
 .B \-\-refuse
