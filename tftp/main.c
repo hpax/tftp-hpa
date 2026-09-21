@@ -111,6 +111,7 @@ static int status(int, char **);
 static int setliteral(int, char **);
 static int setwindowsize(int, char **);
 static int settsize(int, char **);
+static int setoptions(int, char **);
 
 static void command(void);
 
@@ -282,6 +283,14 @@ static const struct cmd cmdtab[] = {
         "  windowsize size\n"
         "    Request the RFC 7440 windowsize option with 'size' data\n"
         "    blocks per window. Valid values are 1 through 32768.\n"
+    },
+    {
+        "opt[ions]", setoptions,
+        "toggle TFTP options support",
+        "  options\n"
+        "    Toggle the sending of TFTP options. When set to off, no\n"
+        "    TFTP options of any kind are sent. This disables the\n"
+        "    block size, window size, and transfer size functions.\n"
     },
     {
         "?", help,
@@ -1082,7 +1091,18 @@ static int settsize(int argc, char *argv[])
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     copt.tsize = !copt.tsize;
-    printf("tsize option %s.\n", copt.tsize ? "on" : "off");
+    printf("tsize option %s%s.\n",
+           copt.tsize ? "on" : "off",
+           copt.no_options ? " (options disabled)" : "");
+    return 0;
+}
+
+static int setoptions(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;                 /* Quiet unused warning */
+    copt.no_options = !copt.no_options;
+    printf("TFTP options %s.\n", copt.no_options ? "disabled" : "enabled");
     return 0;
 }
 
@@ -1091,25 +1111,30 @@ static int status(int argc, char *argv[])
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
     if (serv.connected) {
-        printf("Connected to: %s (%s) %s",
-               serv.host, serv.canonname, serv.addr_str);
+        printf("Connected to: %s ", serv.host);
+        if (strcmp(serv.host, serv.canonname))
+            printf("(%s) ", serv.canonname);
+        printf("%s\n", serv.addr_str);
     } else {
-        printf("Not connected");
+        printf("Not connected\n");
     }
-    printf("Mode: %s Verbose: %s Tracing: %s Literal: %s\n",
+    printf("Mode: %s, verbose: %s, tracing: %s, literal: %s\n",
            copt.mode->m_mode,
            copt.verbose ? "on" : "off", copt.trace ? "on" : "off",
            copt.literal ? "on" : "off");
-    printf("Rexmt-interval: %d seconds, Max-timeout: %d seconds\n",
+    printf("Retransmit interval: %d s, total timeout: %d s\n",
            copt.rexmtval, copt.maxtimeout);
-    printf("Blocksize: ");
-    if (xopt.blksize <= 0)
-        printf("mtu");
-    if (xopt.blksize != 0)
-        printf("%d", xopt.blksize);
-    printf(", windowsize: %u, tsize: %s\n",
-           xopt.max_windowsize ? xopt.max_windowsize : 1,
-           copt.tsize ? "on" : "off");
+    printf("TFTP options: %s\n", copt.no_options ? "disabled" : "enabled");
+    if (!copt.no_options) {
+        printf("Blocksize: ");
+        if (xopt.blksize <= 0)
+            printf("mtu");
+        if (xopt.blksize != 0)
+            printf("%d", xopt.blksize);
+        printf(", windowsize: %u, tsize: %s\n",
+               xopt.max_windowsize ? xopt.max_windowsize : 1,
+               copt.tsize ? "on" : "off");
+    }
     return 0;
 }
 

@@ -282,7 +282,15 @@ data blocks per window. Valid values are 1 through 32768.
 .TP
 \fBtsize\fP
 Toggle sending the RFC 2349 \fBtsize\fP (transfer size) option. The
-default is on, unless the \fB\-\-no-tsize\fP command line option was given.
+default is on, unless the \fB\-\-no-tsize\fP command line option was
+given.
+.TP
+\fBoptions\fP
+Toggle the sending of TFTP options entirely. The default is enabled,
+unless the \fB\-\-no-options\fP command line option was given. If
+disabled, TFTP options are never sent; if enabled, TFTP options
+.I may
+be sent.
 .TP
 .B trace
 Toggle packet tracing (a debugging feature.)
