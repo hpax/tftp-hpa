@@ -16,10 +16,9 @@ struct modes;
  * Connection and transfer state deliberately remain outside this structure.
  */
 struct tftp_options {
-    int verbose;
-    int rexmtval;
-    int maxtimeout;
     const struct modes *mode;
+    uintmax_t maxtimeout;
+    int verbose;
     bool trace;
     bool literal;
     bool tsize;

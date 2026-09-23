@@ -7,6 +7,7 @@
  */
 
 #include "common/tftpsubs.h"
+#include "common/clock.h"
 #include "options.h"
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
@@ -25,7 +26,6 @@
 
 #include "extern.h"
 
-#define	TIMEOUT		1       /* secs between rexmt's */
 #define TRIES		6       /* Number of attempts to send each packet */
 #define TIMEOUT_LIMIT	((1 << TRIES)-1)
 #define	LBUFLEN		200     /* size of input buffer */
@@ -53,20 +53,20 @@ static const struct modes modes[] = {
 #define MODE_DEFAULT  MODE_OCTET
 
 struct tftp_options copt = {
-    .mode = MODE_DEFAULT,
-    .rexmtval = TIMEOUT,
-    .maxtimeout = TIMEOUT_LIMIT * TIMEOUT,
-    .tsize = true
+    .mode		= MODE_DEFAULT,
+    .tsize		= true,
+    .maxtimeout		= DEF_TIMEOUT * TIMEOUT_LIMIT,
 };
 
 struct common_options xopt = {
 #ifdef HAVE_IPV6
-    .ai_fam = AF_UNSPEC,
+    .ai_fam		= AF_UNSPEC,
 #else
-    .ai_fam = AF_INET,
+    .ai_fam		= AF_INET,
 #endif
-    .max_windowsize = 64,
-    .blksize = 0                /* Use MTU */
+    .max_windowsize	= 64,
+    .blksize		= 0,               /* Use MTU */
+    .rexmtval		= DEF_TIMEOUT,
 };
 
 struct server_info serv;
@@ -101,8 +101,10 @@ static int setascii(int, char **);
 static int setbinary(int, char **);
 static int setblocksize(int, char **);
 static int setpeer(int, char **);
+static int parse_rexmtval(const char *str, FILE *errf);
 static int setrexmt(int, char **);
 static int set_transfer_host(char *, const char *);
+static int parse_timeout(const char *str, FILE *errf);
 static int settimeout(int, char **);
 static int settrace(int, char **);
 static int set_verbosity(const char *, bool);
@@ -117,8 +119,7 @@ static void command(void);
 
 static void getusage(const char *);
 static int makeargv(char *, char **);
-static bool parse_uint_range(const char *, unsigned int, unsigned int,
-                             unsigned int *);
+static uintmax_t parse_uint_range(const char *, uintmax_t, uintmax_t);
 static void putusage(const char *);
 static void settftpmode(const struct modes *);
 
@@ -346,20 +347,20 @@ static void usage(int errcode)
     exit(errcode);
 }
 
-static bool parse_uint_range(const char *arg, unsigned int minimum,
-                             unsigned int maximum, unsigned int *value)
+#define BAD_NUM ((uintmax_t)(-1))
+
+static uintmax_t
+parse_uint_range(const char *arg, uintmax_t minimum, uintmax_t maximum)
 {
     char *end;
-    unsigned long parsed;
+    uintmax_t parsed;
 
     errno = 0;
-    parsed = strtoul(arg, &end, 10);
-    if (errno || *arg == '\0' || *end || parsed < minimum ||
-        parsed > maximum)
-        return false;
+    parsed = strtoumax(arg, &end, 10);
+    if (errno || end == arg || *end || parsed < minimum || parsed > maximum)
+        return BAD_NUM;
 
-    *value = (unsigned int)parsed;
-    return true;
+    return parsed;
 }
 
 static const struct option long_options[] = {
@@ -393,6 +394,7 @@ int main(int argc, char *argv[])
     static int pargc, peerargc;
     static char **pargv;
     char *peerargv[3];
+    uintmax_t v;
 
     set_progname(argv[0]);
     random_init();
@@ -485,11 +487,13 @@ int main(int argc, char *argv[])
             break;
         case 'W':
         case 'w':
-            if (!parse_uint_range(optarg, 1, TFTP_MAX_WINDOWSIZE,
-                                  &xopt.max_windowsize)) {
+            v = parse_uint_range(optarg, 1, TFTP_MAX_WINDOWSIZE);
+            if (v == BAD_NUM) {
                 fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
                         optarg, TFTP_MAX_WINDOWSIZE);
                 exit(EX_USAGE);
+            } else {
+                xopt.max_windowsize = v;
             }
             break;
         case 'T':
@@ -990,10 +994,28 @@ static void getusage(const char *s)
     printf("       %s file file ... file if connected\n", s);
 }
 
+static int parse_rexmtval(const char *str, FILE *errf)
+{
+    const double mini = (double)MIN_TIMEOUT/USEC_PER_SEC;
+    const double maxi = (double)MAX_TIMEOUT/USEC_PER_SEC;
+    double t;
+    char *ep;
+
+    errno = 0;
+    t = strtod(str, &ep);
+    /* Careful here: keep in mind unordered values! */
+    if (!errno && t >= mini && t <= maxi) {
+        xopt.rexmtval   = t * USEC_PER_SEC;
+        copt.maxtimeout = xopt.rexmtval * TIMEOUT_LIMIT;
+    } else {
+        fprintf(errf, "Bad value (range %g-%g): %s\n", mini, maxi, str);
+        return EX_USAGE;
+    }
+    return 0;
+}
+
 static int setrexmt(int argc, char *argv[])
 {
-    int t;
-
     if (argc < 2) {
         if (!getmoreargs("rexmt-timeout ", "(value) "))
             return EX_USAGE;
@@ -1004,21 +1026,31 @@ static int setrexmt(int argc, char *argv[])
         printf("usage: %s value\n", argv[0]);
         return EX_USAGE;
     }
-    t = atoi(argv[1]);
-    if (t < 1) {
-        printf("%s: bad value\n", argv[1]);
-        return EX_USAGE;
+
+    return parse_rexmtval(argv[1], stdout);
+}
+
+static int parse_timeout(const char *str, FILE *errf)
+{
+    const double mini = (double)xopt.rexmtval/USEC_PER_SEC;
+    const double maxi = (double)MAX_TIMEOUT*TIMEOUT_LIMIT/USEC_PER_SEC;
+    double t;
+    char *ep;
+
+    errno = 0;
+    t = strtod(str, &ep);
+    /* Careful here: keep in mind unordered values! */
+    if (!errno && t >= mini && t <= maxi) {
+        copt.maxtimeout = t * USEC_PER_SEC + 1.0;
     } else {
-        copt.rexmtval = t;
-        copt.maxtimeout = copt.rexmtval * TIMEOUT_LIMIT;
+        fprintf(errf, "Bad value (range %g-%g): %s\n", mini, maxi, str);
+        return EX_USAGE;
     }
     return 0;
 }
 
 static int settimeout(int argc, char *argv[])
 {
-    int t;
-
     if (argc < 2) {
         if (!getmoreargs("maximum-timeout ", "(value) "))
             return EX_USAGE;
@@ -1029,13 +1061,8 @@ static int settimeout(int argc, char *argv[])
         printf("usage: %s value\n", argv[0]);
         return EX_USAGE;
     }
-    t = atoi(argv[1]);
-    if (t < 1) {
-        printf("%s: bad value\n", argv[1]);
-        return EX_USAGE;
-    } else
-        copt.maxtimeout = t;
-    return 0;
+
+    return parse_timeout(argv[1], stdout);
 }
 
 static int setblocksize(int argc, char *argv[])
@@ -1060,6 +1087,8 @@ static int setblocksize(int argc, char *argv[])
 
 static int setwindowsize(int argc, char *argv[])
 {
+    uintmax_t v;
+
     if (argc < 2) {
         if (!getmoreargs("windowsize ", "(size) "))
             return EX_USAGE;
@@ -1070,12 +1099,14 @@ static int setwindowsize(int argc, char *argv[])
         printf("usage: %s size\n", argv[0]);
         return EX_USAGE;
     }
-    if (!parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE,
-                          &xopt.max_windowsize)) {
+
+    v = parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE);
+    if (v == BAD_NUM) {
         printf("%s: bad window size (valid range is 1-%u)\n",
                argv[1], TFTP_MAX_WINDOWSIZE);
         return EX_USAGE;
     }
+    xopt.max_windowsize = v;
     return 0;
 }
 
@@ -1124,8 +1155,9 @@ static int status(int argc, char *argv[])
            copt.mode->m_mode,
            copt.verbose ? "on" : "off", copt.trace ? "on" : "off",
            copt.literal ? "on" : "off");
-    printf("Retransmit interval: %d s, total timeout: %d s\n",
-           copt.rexmtval, copt.maxtimeout);
+    printf("Retransmit interval: %g s, total timeout: %g s\n",
+           (double)xopt.rexmtval / USEC_PER_SEC,
+           (double)copt.maxtimeout / USEC_PER_SEC);
     printf("TFTP options: %s\n", copt.no_options ? "disabled" : "enabled");
     if (!copt.no_options) {
         printf("Blocksize: ");

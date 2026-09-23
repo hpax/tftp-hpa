@@ -178,7 +178,7 @@ int getsockint(int sockfd, int level, int optname)
  */
 int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
                    struct sockaddr *from, socklen_t *fromlen,
-                   unsigned long *timeout_us_p)
+                   uintmax_t *timeout_us_p)
 {
     uintmax_t t0, dt;
     int rv, err = errno;

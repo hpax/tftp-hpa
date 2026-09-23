@@ -173,7 +173,7 @@ static inline int sa_set_port(union sock_addr *s, uint16_t port)
 
 void tftp_set_socket_buffers(int, unsigned int, unsigned int, bool);
 int tftp_recv_time(int, void *, int, unsigned int, struct sockaddr *,
-                   socklen_t *, unsigned long *);
+                   socklen_t *, uintmax_t *);
 const char *net_family(sa_family_t);
 char *net_address(const struct sockaddr *, socklen_t);
 

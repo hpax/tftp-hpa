@@ -9,6 +9,7 @@
 #define TFTP_TFTP_H
 
 #include "config.h"
+#include "common/clock.h"
 
 /* TFTP packet type */
 enum tftp_opcode {
@@ -76,5 +77,18 @@ enum protocol_option_enum {
 
 /* Maximum size of a TFTP request cookie */
 #define TFTP_MAX_COOKIE	255
+
+/* Maximum, default and minimum timeouts (s and us) */
+#define MIN_TIMEOUT_SEC	1
+#define DEF_TIMEOUT_SEC	1
+#define MAX_TIMEOUT_SEC	255
+
+#define MIN_TIMEOUT     10000UL
+#define DEF_TIMEOUT     (DEF_TIMEOUT_SEC * USEC_PER_SEC)
+#define MAX_TIMEOUT     (MAX_TIMEOUT_SEC * USEC_PER_SEC)
+
+/* Number of attempts to send each packet */
+#define TRIES		6
+#define TIMEOUT_LIMIT	((1 << TRIES)-1)
 
 #endif /* TFTP_TFTP_H */

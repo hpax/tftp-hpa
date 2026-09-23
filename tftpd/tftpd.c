@@ -63,17 +63,13 @@ static char *unlink_info;
 #define O_NOFOLLOW 0
 #endif
 
-#define	TIMEOUT 1000000         /* Default timeout (us) */
-#define TRIES   6               /* Number of attempts to send each packet */
-#define TIMEOUT_LIMIT ((1 << TRIES)-1)
-
 /* Default daemon wait timeout when not running standalone */
-#define DEFAULT_WAITTIME	(900*1000000)
+#define DEFAULT_WAITTIME	(900 * USEC_PER_SEC);
 
 static int peer;
-static unsigned long timeout  = TIMEOUT;        /* Current timeout value */
-static unsigned long rexmtval = TIMEOUT;	/* Basic timeout value */
-static unsigned long maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
+static uintmax_t timeout    = DEF_TIMEOUT; /* Current timeout value */
+static uintmax_t rexmtval   = DEF_TIMEOUT; /* Basic timeout value */
+static uintmax_t maxtimeout = TIMEOUT_LIMIT * DEF_TIMEOUT;
 static bool timeout_quit;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
@@ -108,7 +104,6 @@ static struct tsize {
 
 struct daemon_options dopt = {
     .max_windowbytes = MAX_WINDOWBYTES,
-    .rexmtval = TIMEOUT,
     .map_steps = DAEMON_DEFAULT_MAP_STEPS,
     .waittime = -1,
     .service = "tftp",
@@ -123,7 +118,8 @@ struct common_options xopt = {
     .ai_fam = AF_INET,
 #endif
     .max_windowsize = MAX_WINDOWSIZE,
-    .blksize = MAX_SEGSIZE
+    .blksize	    = MAX_SEGSIZE,
+    .rexmtval       = DEF_TIMEOUT,
 };
 
 #ifdef WITH_REGEX
@@ -343,7 +339,7 @@ static int lock_file(int fd, bool lock_write)
 #endif
 
 static int recv_time(int s, void *rbuf, int len, unsigned int flags,
-                     unsigned long *timeout_us_p)
+                     uintmax_t *timeout_us_p)
 {
     int rv = tftp_recv_time(s, rbuf, len, flags, NULL, NULL, timeout_us_p);
 
@@ -354,7 +350,7 @@ static int recv_time(int s, void *rbuf, int len, unsigned int flags,
 }
 
 struct daemon_xfer_context {
-    unsigned long timeout;
+    uintmax_t timeout;
 };
 
 static int daemon_xfer_send(void *vctx, const void *packet, int length)
@@ -726,11 +722,11 @@ int main(int argc, char **argv)
             {
                 char *vp;
                 unsigned long tov = strtoul(optarg, &vp, 10);
-                if (tov < 10000UL || tov > 255000000UL || *vp) {
+                if (tov < MIN_TIMEOUT || tov > MAX_TIMEOUT || *vp) {
                     tftpd_log(LOG_ERR, "Bad timeout value: %s", optarg);
                     exit(EX_USAGE);
                 }
-                dopt.rexmtval = tov;
+                xopt.rexmtval = tov;
             }
             break;
         case 'R':
@@ -848,7 +844,7 @@ int main(int argc, char **argv)
             break;
         }
 
-    rexmtval = timeout = dopt.rexmtval;
+    rexmtval = timeout = xopt.rexmtval;
     maxtimeout = rexmtval * TIMEOUT_LIMIT;
 
     /* Always validate when --secure or --jail are not used */
@@ -999,10 +995,12 @@ int main(int argc, char **argv)
      *
      * If a wait time of 0 is specified, set it to infinite.
      */
-    if (dopt.waittime < 0)
-        dopt.waittime = dopt.standalone ? -1 : DEFAULT_WAITTIME;
-    else if (!dopt.waittime)
-        dopt.waittime = -1;
+    if (dopt.waittime <= 0) {
+        if (!dopt.waittime || dopt.standalone)
+            dopt.waittime = -1;
+        else
+            dopt.waittime = DEFAULT_WAITTIME;
+    }
 
     /*
      * If we're running standalone, open the listening sockets,
@@ -1699,11 +1697,6 @@ static void negotiate_tsize(void)
     }
 }
 
-#define MIN_TIMEOUT     (10000UL)
-#define MAX_TIMEOUT     (255UL * USEC_PER_SEC)
-#define MIN_TIMEOUT_SEC ((MIN_TIMEOUT + USEC_PER_SEC - 1)/USEC_PER_SEC)
-#define MAX_TIMEOUT_SEC (MAX_TIMEOUT / USEC_PER_SEC)
-
 static void negotiate_timeout(void)
 {
     struct daemon_protocol_option *tos = opt_requested(PO_TIMEOUT);
@@ -2234,7 +2227,7 @@ static void tftp_sendfile(const struct formats *pf, struct tftphdr *oap,
 {
     struct tftphdr ack;         /* ack packet */
     uint16_t ap_opcode, ap_block;
-    unsigned long r_timeout;
+    uintmax_t r_timeout;
     int n;
     struct daemon_xfer_context context;
     struct tftp_xfer xfer;

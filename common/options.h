@@ -15,6 +15,7 @@ struct common_options {
     unsigned int portrange_to;
     int blksize;                /* Relative to MTU if <= 0 */
     unsigned int max_windowsize;
+    uintmax_t rexmtval;     /* Initial retransmission timeout (us) */
 };
 
 extern struct common_options xopt;

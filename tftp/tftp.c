@@ -26,7 +26,7 @@ struct peer {
 };
 static struct peer peer = { .sock = -1 };
 
-static unsigned long timeout;
+static uintmax_t timeout;
 static sigjmp_buf timeoutbuf;
 static sigjmp_buf *active_timeoutbuf = &timeoutbuf;
 
@@ -61,7 +61,7 @@ static void tpacket(const char *, const struct tftphdr *, int);
 
 struct client_xfer_context {
     union sock_addr from;
-    unsigned long timeout;
+    uintmax_t timeout;
 };
 
 static bool address_match(const union sock_addr *a, const union sock_addr *b)
@@ -82,7 +82,7 @@ static bool address_match(const union sock_addr *a, const union sock_addr *b)
 }
 
 static int client_recv_time(void *packet, int length, union sock_addr *from,
-                            unsigned long *timeout_us_p)
+                            uintmax_t *timeout_us_p)
 {
     socklen_t fromlen = sizeof(*from);
     int n;
@@ -139,7 +139,7 @@ static void client_xfer_retry_enter(void *vctx, sigjmp_buf *retrybuf,
     (void)vctx;
     active_timeoutbuf = retrybuf;
     if (!restarted)
-        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
+        timeout = xopt.rexmtval;
 }
 
 static void client_xfer_retry_leave(void *vctx)
@@ -315,7 +315,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode)
 
     /* A peer which ignores options answers a WRQ with ACK 0. */
     for (;;) {
-        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
+        timeout = xopt.rexmtval;
         (void)sigsetjmp(timeoutbuf, 1);
         if (copt.trace)
             tpacket("sent", req, size);
@@ -480,7 +480,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode)
 
     /* RFC 7440 peers answer with OACK; legacy peers start with DATA 1. */
     for (;;) {
-        timeout = (unsigned long)copt.rexmtval * USEC_PER_SEC;
+        timeout = xopt.rexmtval;
         (void)sigsetjmp(timeoutbuf, 1);
         if (copt.trace)
             tpacket("sent", req, size);
@@ -926,7 +926,7 @@ static void timer(int sig)
     (void)sig;                  /* Shut up unused warning */
 
     timeout <<= 1;
-    if (timeout >= (unsigned long)copt.maxtimeout * USEC_PER_SEC) {
+    if (timeout > copt.maxtimeout) {
         errno = save_errno;
         siglongjmp(toplevel, EX_TEMPFAIL);
     }

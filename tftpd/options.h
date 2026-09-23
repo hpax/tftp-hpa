@@ -40,7 +40,6 @@ struct daemon_options {
     bool use_stderr;
     uintmax_t max_upload;
     uintmax_t max_windowbytes;
-    unsigned long rexmtval;
     int verbosity;
     int map_steps;
     int mtu_adj;
