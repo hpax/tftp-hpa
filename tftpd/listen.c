@@ -74,7 +74,7 @@ int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam)
     if (!*hostname)
         hostname = NULL;
 
-    if (!service)
+    if (!service || !*service)
         service = dopt.service;
 
     err = getaddrinfo(hostname, service, &hints, &addrs);
@@ -88,12 +88,7 @@ int listen_to(struct pollset *set, const char *name, sa_family_t ai_fam)
     }
 
     for (ai = addrs; ai; ai = ai->ai_next) {
-        char *addrstr;
         int fd;
-
-        addrstr = net_address(ai->ai_addr, ai->ai_addrlen);
-        fprintf(stderr, "%s: lookup returned: %s\n", name, addrstr);
-        xfree(addrstr);
 
         if (ai_fam != AF_UNSPEC && ai->ai_family != ai_fam)
             continue;
