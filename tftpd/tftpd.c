@@ -904,6 +904,8 @@ int main(int argc, char **argv)
     /*
      * Set up the supplementary group list as early as possible.
      */
+    cap_set_before_initgroups();
+
 #if defined(HAVE_INITGROUPS)
     if (initgroups(dopt.user.name, dopt.user.pw->pw_gid) && errno != EPERM) {
         tftpd_log(LOG_CRIT, "cannot set group list for user %s",

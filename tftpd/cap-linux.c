@@ -232,7 +232,7 @@ void cap_set_none(void)
     cap_set_privs(PRIV_NONE, PRIV_NONE);
 }
 
-void cap_set_after_initgroups(void)
+void cap_set_before_initgroups(void)
 {
     enum priv_mask drop = 0;
 
@@ -247,6 +247,13 @@ void cap_set_after_initgroups(void)
 
     if (can_drop_setuid(dopt.user.pw->pw_uid))
         drop |= PRIV_SETUID;
+
+    cap_set_privs(PRIV_SETGID, drop);
+}
+
+void cap_set_after_initgroups(void)
+{
+    enum priv_mask drop = 0;
 
     if (can_drop_setgid(dopt.user.pw->pw_gid))
         drop |= PRIV_SETGID;

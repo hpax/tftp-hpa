@@ -25,6 +25,7 @@
 #if CAP_TYPE
 
 void cap_set_none(void);
+void cap_set_before_initgroups(void);
 void cap_set_after_initgroups(void);
 void cap_set_before_listen(void);
 void cap_set_before_socket_bind(void);
