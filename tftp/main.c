@@ -437,7 +437,7 @@ int main(int argc, char *argv[])
             break;
         case 'V':
             /* Print version and configuration to stdout and exit */
-            printf("%s\n", TFTP_CONFIG_STR);
+            print_configuration(stdout);
             exit(0);
         case 'b':
             settftpmode(MODE_OCTET);
@@ -1358,7 +1358,7 @@ static int help(int argc, char *argv[])
 
         printf("%s command list\n"
                "Commands may be abbreviated as indicated by [...]\n",
-               VERSION);
+               version_string);
         for (c = cmdtab; c < ARRAY_END(cmdtab); c++)
             printf("  %-*s  %s\n", helpindent, c->name, c->shorthelp);
     } else {

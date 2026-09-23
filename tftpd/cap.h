@@ -1,7 +1,13 @@
 /*
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Copyright (c) 2026 H. Peter Anvin <hpa@zytor.com>
+ */
+
+/*
  * cap.h
  *
- * Capabilities handling
+ * Capabilities handling hooks
  */
 
 #ifndef TFTPD_CAP_H
@@ -9,41 +15,14 @@
 
 #include "config.h"
 
-#define CAP_TYPE_NONE	0
-#define CAP_TYPE_LINUX	1
-
-#ifdef HAVE_CAP_SET_PROC
-#ifdef __linux__
-#define CAP_TYPE CAP_TYPE_LINUX
-#endif
-#endif
-
-#ifndef CAP_TYPE
-#define CAP_TYPE CAP_TYPE_NONE
-#endif
-
-#if CAP_TYPE
-
-void cap_set_none(void);
-void cap_set_before_initgroups(void);
-void cap_set_after_initgroups(void);
-void cap_set_before_listen(void);
-void cap_set_before_socket_bind(void);
-void cap_set_before_chroot(void);
-void cap_set_before_setid(void);
-void cap_set_drop_all(void);
-
-#else
-
-static inline void cap_set_none(void) { }
-static inline void cap_set_after_initgroups(void) { }
-static inline void cap_set_before_listen(void) { }
-static inline void cap_set_after_listen(void) { }
-static inline void cap_set_before_socket_bind(void) { }
-static inline void cap_set_before_chroot(void) { }
-static inline void cap_set_before_setid(void) { }
-static inline void cap_set_drop_all(void) { }
-
-#endif
+void capset_none(void);
+void capset_before_initgroups(void);
+void capset_after_initgroups(void);
+void capset_before_listen(void);
+void capset_before_socket_bind(void);
+void capset_before_chroot(void);
+void capset_before_setid(void);
+void capset_drop_all(void);
+const char *capset_get_type(void);
 
 #endif /* TFTPD_CAP_H */

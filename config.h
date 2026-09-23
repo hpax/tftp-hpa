@@ -438,29 +438,4 @@ static inline size_t strnlen(const char *str, size_t n)
 #define MIN(x,y) ((x) < (y) ? (x) : (y))
 #define MAX(x,y) ((x) > (y) ? (x) : (y))
 
-/* tftp-hpa version and configuration strings */
-
-#include "version.h"
-
-#ifdef WITH_READLINE
-#define WITH_READLINE_STR ", with readline"
-#else
-#define WITH_READLINE_STR ", without readline"
-#endif
-
-#ifdef WITH_REGEX
-#define WITH_REGEX_STR ", with remap"
-#else
-#define WITH_REGEX_STR ", without remap"
-#endif
-
-#ifdef HAVE_PTHREADS
-#define WITH_THREADS_STR ", with I/O threads"
-#else
-#define WITH_THREADS_STR ", without I/O threads"
-#endif
-
-#define TFTP_CONFIG_STR VERSION WITH_READLINE_STR
-#define TFTPD_CONFIG_STR VERSION WITH_REGEX_STR WITH_THREADS_STR
-
 #endif

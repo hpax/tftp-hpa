@@ -604,7 +604,7 @@ int main(int argc, char **argv)
     set_progname(argv[0]);
     out_of_memory = tftpd_out_of_memory;
 
-    cap_set_none();
+    capset_none();
 
 #ifdef HAVE_LOCALE_H
     setlocale(LC_CTYPE, "");     /* For to(w)(lower|upper)() */
@@ -815,8 +815,7 @@ int main(int argc, char **argv)
             dopt.path_prefix = *optarg ? optarg : NULL;
             break;
         case 'V':
-            /* Print configuration to stdout and exit */
-            printf("%s\n", TFTPD_CONFIG_STR);
+            print_configuration(stdout);
             exit(0);
             break;
         case 'P':
@@ -871,7 +870,7 @@ int main(int argc, char **argv)
     if (dopt.map_test_file) {
         FILE *tf;
 
-        cap_set_drop_all();
+        capset_drop_all();
 
         tf = fopen(dopt.map_test_file, "r");
         if (!tf) {
@@ -904,7 +903,7 @@ int main(int argc, char **argv)
     /*
      * Set up the supplementary group list as early as possible.
      */
-    cap_set_before_initgroups();
+    capset_before_initgroups();
 
 #if defined(HAVE_INITGROUPS)
     if (initgroups(dopt.user.name, dopt.user.pw->pw_gid) && errno != EPERM) {
@@ -921,7 +920,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    cap_set_after_initgroups();
+    capset_after_initgroups();
 
     dopt.dirs = xmalloc((argc - optind + 1) * sizeof(char *));
     patherr = false;
@@ -1034,12 +1033,12 @@ int main(int argc, char **argv)
             if (strlist_isempty(&dopt.listen_addrs))
                 strlist_add(&dopt.listen_addrs, ":");
 
-            cap_set_before_listen();
+            capset_before_listen();
 
             for (ls = dopt.listen_addrs.list; ls; ls = ls->next)
                 listen_to(listen_set, ls->str, xopt.ai_fam);
 
-            cap_set_none();
+            capset_none();
         }
 
         strlist_free(&dopt.listen_addrs);
@@ -1287,7 +1286,7 @@ noreturn static void run_worker(struct tftphdr *tp, int n)
         exit(EX_IOERR);
     }
 
-    cap_set_before_socket_bind();
+    capset_before_socket_bind();
 
     if (pick_port_bind(peer, &myaddr)) {
         tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
@@ -1296,7 +1295,7 @@ noreturn static void run_worker(struct tftphdr *tp, int n)
 
     /* Chroot and drop privileges */
     if (dopt.secure) {
-        cap_set_before_chroot();
+        capset_before_chroot();
 
         if (chroot(".") || chdir("/")) {
             tftpd_log(LOG_ERR, "chroot: %s", strerror(errno));
@@ -1304,7 +1303,7 @@ noreturn static void run_worker(struct tftphdr *tp, int n)
         }
     }
 
-    cap_set_before_setid();
+    capset_before_setid();
 
 #ifdef HAVE_SETRESGID
     check_drop(setresgid(dopt.user.pw->pw_gid, dopt.user.pw->pw_gid,
@@ -1328,7 +1327,7 @@ noreturn static void run_worker(struct tftphdr *tp, int n)
         check_drop(seteuid(dopt.user.pw->pw_uid));
 #endif
 
-    cap_set_none();
+    capset_none();
 
     /* Process the request... */
 

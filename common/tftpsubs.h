@@ -17,6 +17,9 @@ extern pid_t _progpid;
 void set_progname(const char *);	/* main() should pass argv[0] here */
 void post_fork(void);                   /* Invoke in child after fork() */
 
+extern const char version_string[];
+void print_configuration(FILE *);
+
 extern void (*out_of_memory)(void);	/* Optional out of memory handler */
 MALLOC_FUNC(1) void *xmalloc(size_t);
 CALLOC_FUNC(1,2) void *xcalloc(size_t, size_t);

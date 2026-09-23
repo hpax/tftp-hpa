@@ -1,15 +1,14 @@
-/* SPDX-License-Identifier: BSD-3-Clause */
-/* Copyright 2026 H. Peter Anvin - All Rights Reserved */
+/*
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Copyright (c) 2026 H. Peter Anvin <hpa@zytor.com>
+ */
 
 /*
  * cap-linux.c
  *
  * Linux capability management
  */
-
-#include "cap.h"
-
-#if CAP_TYPE == CAP_TYPE_LINUX
 
 #include "tftpd.h"
 #include "options.h"
@@ -44,17 +43,6 @@ static const struct need_priv need_privs[] =
     { PRIV_SETGID,    CAP_SETGID },
 };
 
-#if 1
-static void debug_caps(cap_t caps)
-{
-    char *txt = cap_to_text(caps, NULL);
-    fprintf(stderr, "caps = %s\n", txt);
-    cap_free(txt);
-}
-#else
-#define debug_caps(caps) ((void)0)
-#endif
-
 /*
  * Set the current capability set to "now", unless already dropped;
  * permanently drop all in the "drop" set.
@@ -62,7 +50,7 @@ static void debug_caps(cap_t caps)
  * If a bit is set in both the "now" and "drop" set, it will actually be
  * dropped on the *next* call.
  */
-static void cap_set_privs(enum priv_mask now, enum priv_mask drop)
+static void capset_privs(enum priv_mask now, enum priv_mask drop)
 {
     static enum priv_mask effective;
     static enum priv_mask permitted;
@@ -90,8 +78,6 @@ static void cap_set_privs(enum priv_mask now, enum priv_mask drop)
             ocap_failed = true;
             return;
         }
-
-        debug_caps(ocap);
 
         /*
          * Compute the effective and permitted set as per enum priv_mask
@@ -134,8 +120,6 @@ static void cap_set_privs(enum priv_mask now, enum priv_mask drop)
                 cap_set_flag(ncap, CAP_EFFECTIVE, 1, &np->cap, CAP_SET);
         }
     }
-
-    debug_caps(ncap);
 
     if (cap_compare(ocap, ncap) && cap_set_proc(ncap))
         goto fail;
@@ -227,12 +211,12 @@ static bool portrange_needs_priv_ports(void)
     return xopt.portrange_from < unpriv;
 }
 
-void cap_set_none(void)
+void capset_none(void)
 {
-    cap_set_privs(PRIV_NONE, PRIV_NONE);
+    capset_privs(PRIV_NONE, PRIV_NONE);
 }
 
-void cap_set_before_initgroups(void)
+void capset_before_initgroups(void)
 {
     enum priv_mask drop = 0;
 
@@ -248,43 +232,46 @@ void cap_set_before_initgroups(void)
     if (can_drop_setuid(dopt.user.pw->pw_uid))
         drop |= PRIV_SETUID;
 
-    cap_set_privs(PRIV_SETGID, drop);
+    capset_privs(PRIV_SETGID, drop);
 }
 
-void cap_set_after_initgroups(void)
+void capset_after_initgroups(void)
 {
     enum priv_mask drop = 0;
 
     if (can_drop_setgid(dopt.user.pw->pw_gid))
         drop |= PRIV_SETGID;
 
-    cap_set_privs(PRIV_NONE, drop);
+    capset_privs(PRIV_NONE, drop);
 }
 
 /* --- these two are called only if standalone --- */
-void cap_set_before_listen(void)
+void capset_before_listen(void)
 {
-    cap_set_privs(PRIV_LISTEN, PRIV_LISTEN);
+    capset_privs(PRIV_LISTEN, PRIV_LISTEN);
 }
 
-void cap_set_before_socket_bind(void)
+void capset_before_socket_bind(void)
 {
-    cap_set_privs(PRIV_PORTRANGE, PRIV_PORTRANGE);
+    capset_privs(PRIV_PORTRANGE, PRIV_PORTRANGE);
 }
 
-void cap_set_before_chroot(void)
+void capset_before_chroot(void)
 {
-    cap_set_privs(PRIV_CHROOT, PRIV_CHROOT);
+    capset_privs(PRIV_CHROOT, PRIV_CHROOT);
 }
 
-void cap_set_before_setid(void)
+void capset_before_setid(void)
 {
-    cap_set_privs(PRIV_SETUID|PRIV_SETGID, PRIV_ALL);
+    capset_privs(PRIV_SETUID|PRIV_SETGID, PRIV_ALL);
 }
 
-void cap_set_drop_all(void)
+void capset_drop_all(void)
 {
-    cap_set_privs(PRIV_NONE, PRIV_ALL);
+    capset_privs(PRIV_NONE, PRIV_ALL);
 }
 
-#endif
+const char *capset_get_type(void)
+{
+    return "Linux";
+}

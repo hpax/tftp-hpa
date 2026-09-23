@@ -9,7 +9,7 @@ VERSION = $(shell cat ../version)
 -include ../config/MCONFIG
 include ../MRULES
 
-OBJS = tftp.$(O) main.$(O)
+OBJS = tftp.$(O) main.$(O) version.$(O)
 
 all: tftp$(X) tftp.1
 
