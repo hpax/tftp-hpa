@@ -6,6 +6,27 @@ Changes in 7.2:
 	are no known users for this option that use any other values
 	than 0 and 1, simply constrain the valid range accordingly.
 
+	On Linux, if the server is started as root, or otherwise
+	privileged, it now drops any capabilities it no longer needs,
+	and deasserts any capabilities it is not actively using.
+	(Implementations for other operating systems will be happily
+	accepted.)
+
+	Supplementary groups are now initialized early, to reduce the
+	need to access naming services late.
+
+	Add an experimental TFTP "cookie" option to help a client
+	associate request and reply, and a server detect duplicated
+	request packets.
+
+	Adjust the level of some important server log messages.
+
+	Better checks for failure to drop permissions.
+
+	tftpd: fix running in standalone listening mode without an -a
+	(address) argument, or when an address argument contains a :
+	but no service name/port number.
+
 
 Changes in 7.1:
 	A C99 compiler and standard library are now required to build
