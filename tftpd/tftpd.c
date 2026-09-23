@@ -8,6 +8,7 @@
  */
 
 #include "config.h"             /* Must be included first */
+#include "cap.h"
 #include "tftpd.h"
 #include "path.h"
 #include "strlist.h"
@@ -70,9 +71,8 @@ static char *unlink_info;
 #define DEFAULT_WAITTIME	(900*1000000)
 
 static int peer;
-static struct passwd *pw;                /* The user to run as */
 static unsigned long timeout  = TIMEOUT;        /* Current timeout value */
-static unsigned long rexmtval = TIMEOUT;       /* Basic timeout value */
+static unsigned long rexmtval = TIMEOUT;	/* Basic timeout value */
 static unsigned long maxtimeout = TIMEOUT_LIMIT * TIMEOUT;
 static bool timeout_quit;
 static sigjmp_buf timeoutbuf;
@@ -112,7 +112,7 @@ struct daemon_options dopt = {
     .map_steps = DAEMON_DEFAULT_MAP_STEPS,
     .waittime = -1,
     .service = "tftp",
-    .user = "nobody",
+    .user = { .name = "nobody" },
     .max_upload = OFF_T_MAX
 };
 
@@ -426,7 +426,7 @@ static const struct tftp_xfer_ops daemon_xfer_ops = {
 
 static void tftpd_out_of_memory(void)
 {
-    tftpd_log(LOG_ERR, "fatal error: %s", strerror(errno));
+    tftpd_log(LOG_CRIT, "fatal error: %s", strerror(errno));
     exit(EX_OSERR);
 }
 
@@ -575,6 +575,19 @@ static bool is_directory(const char *path)
     return true;
 }
 
+/*
+ * Abort after a privilege-dropping set*id(); if errno is EPERM, then
+ * assume the process is already restricted.
+ */
+static int check_drop(int v)
+{
+    if (!v || errno == EPERM)
+        return v;
+
+    tftpd_log(LOG_CRIT, "cannot drop provileges: %s", strerror(errno));
+    exit(EX_OSERR);
+}
+
 int main(int argc, char **argv)
 {
     struct tftphdr *tp;
@@ -588,12 +601,14 @@ int main(int argc, char **argv)
     pollset_cursor cursor;
     int nullfd;
 
+    set_progname(argv[0]);
+    out_of_memory = tftpd_out_of_memory;
+
+    cap_set_none();
+
 #ifdef HAVE_LOCALE_H
     setlocale(LC_CTYPE, "");     /* For to(w)(lower|upper)() */
 #endif
-
-    set_progname(argv[0]);
-    out_of_memory = tftpd_out_of_memory;
 
     /* Randomness is used for port (transfer ID) assignment */
     random_init();
@@ -721,6 +736,7 @@ int main(int argc, char **argv)
         case 'R':
             if (sscanf(optarg, "%u:%u", &xopt.portrange_from,
                        &xopt.portrange_to) != 2 ||
+                !xopt.portrange_from ||
                 xopt.portrange_from > xopt.portrange_to ||
                 xopt.portrange_to >= 65535) {
                 tftpd_log(LOG_ERR, "Bad port range: %s", optarg);
@@ -728,7 +744,7 @@ int main(int argc, char **argv)
             }
             break;
         case 'u':
-            dopt.user = optarg;
+            dopt.user.name = optarg;
             break;
         case 'U':
             dopt.my_umask = strtoul(optarg, &ep, 8);
@@ -853,7 +869,11 @@ int main(int argc, char **argv)
 #endif
 
     if (dopt.map_test_file) {
-        FILE *tf = fopen(dopt.map_test_file, "r");
+        FILE *tf;
+
+        cap_set_drop_all();
+
+        tf = fopen(dopt.map_test_file, "r");
         if (!tf) {
             tftpd_log(LOG_ERR, "%s: cannot open map test file: %s",
                       dopt.map_test_file, strerror(errno));
@@ -871,6 +891,35 @@ int main(int argc, char **argv)
             exit(EX_DATAERR);
         }
     }
+
+    /*
+     * The user to run as
+     */
+    dopt.user.pw = getpwnam(dopt.user.name);
+    if (!dopt.user.pw) {
+        tftpd_log(LOG_ERR, "no user %s: %s", dopt.user.name, strerror(errno));
+        exit(EX_NOUSER);
+    }
+
+    /*
+     * Set up the supplementary group list as early as possible.
+     */
+#if defined(HAVE_INITGROUPS)
+    if (initgroups(dopt.user.name, dopt.user.pw->pw_gid) && errno != EPERM) {
+        tftpd_log(LOG_CRIT, "cannot set group list for user %s",
+                  dopt.user.name);
+        exit(EX_OSERR);
+    }
+#elif defined(HAVE_SETGROUPS)
+    /* If we can't get the supplementary group list, at least clear it */
+    if (setgroups(0, NULL) && errno != EPERM) {
+	tftpd_log(LOG_CRIT, "cannot clear group list for user %s",
+                  dopt.user.name);
+        exit(EX_OSERR);
+    }
+#endif
+
+    cap_set_after_initgroups();
 
     dopt.dirs = xmalloc((argc - optind + 1) * sizeof(char *));
     patherr = false;
@@ -938,12 +987,6 @@ int main(int argc, char **argv)
         free(securepath);
     }
 
-    pw = getpwnam(dopt.user);
-    if (!pw) {
-        tftpd_log(LOG_ERR, "no user %s: %s", dopt.user, strerror(errno));
-        exit(EX_NOUSER);
-    }
-
     if (dopt.pidfile && !dopt.standalone) {
         tftpd_log(LOG_WARNING, "not in standalone mode, ignoring pid file");
         dopt.pidfile = NULL;
@@ -989,8 +1032,12 @@ int main(int argc, char **argv)
             if (strlist_isempty(&dopt.listen_addrs))
                 strlist_add(&dopt.listen_addrs, ":");
 
+            cap_set_before_listen();
+
             for (ls = dopt.listen_addrs.list; ls; ls = ls->next)
                 listen_to(listen_set, ls->str, xopt.ai_fam);
+
+            cap_set_none();
         }
 
         strlist_free(&dopt.listen_addrs);
@@ -1199,9 +1246,6 @@ int main(int argc, char **argv)
 
 noreturn static void run_worker(struct tftphdr *tp, int n)
 {
-    int setrv;
-    int die;
-
     /* Child process: handle the actual request here */
     post_fork();
     random_post_fork_child();
@@ -1230,81 +1274,61 @@ noreturn static void run_worker(struct tftphdr *tp, int n)
     /* Convert the client address to a string */
     from_str = net_address(&from.sa, sizeof from);
 
-    /* Get a socket.  This has to be done before the chroot(), since
-       some systems require access to /dev to create a socket. */
-
+    /*
+     * Get a socket.  This has to be done before the chroot(), since
+     * some systems require access to /dev to create a socket, and
+     * some users want to use a portrange in the privileged region.
+     */
     peer = socket(myaddr.sa.sa_family, SOCK_DGRAM, 0);
     if (peer < 0) {
         tftpd_log(LOG_ERR, "socket: %s", strerror(errno));
         exit(EX_IOERR);
     }
 
-    /* Set up the supplementary group access list if possible
-       /etc/group still need to be accessible at this point.
-       If we get EPERM, this is already a restricted process, e.g.
-       using user namespaces on Linux. */
-    die = 0;
-#ifdef HAVE_SETGROUPS
-    setrv = setgroups(0, NULL);
-    if (setrv && errno != EPERM) {
-	tftpd_log(LOG_ERR, "cannot clear group list");
-	die = EX_OSERR;
+    cap_set_before_socket_bind();
+
+    if (pick_port_bind(peer, &myaddr)) {
+        tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
+        exit(EX_IOERR);
     }
-#endif
-#ifdef HAVE_INITGROUPS
-    setrv = initgroups(dopt.user, pw->pw_gid);
-    if (!setrv) {
-	die = 0;
-    } else if (errno != EPERM) {
-        tftpd_log(LOG_ERR, "cannot set groups for user %s", dopt.user);
-	die = EX_OSERR;
-    }
-#endif
-    if (die)
-	exit(die);
 
     /* Chroot and drop privileges */
     if (dopt.secure) {
+        cap_set_before_chroot();
+
         if (chroot(".") || chdir("/")) {
             tftpd_log(LOG_ERR, "chroot: %s", strerror(errno));
             exit(EX_OSERR);
         }
     }
 
+    cap_set_before_setid();
+
 #ifdef HAVE_SETRESGID
-    setrv = setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid);
+    check_drop(setresgid(dopt.user.pw->pw_gid, dopt.user.pw->pw_gid,
+                         dopt.user.pw->pw_gid));
 #elif defined(HAVE_SETREGID)
-    setrv = setregid(pw->pw_gid, pw->pw_gid);
+    check_drop(setregid(dopt.user.pw->pw_gid, dopt.user.pw->pw_gid));
 #else
-    setrv = setegid(pw->pw_gid) || setgid(pw->pw_gid);
+    check_drop(setegid(dopt.user.pw->pw_gid));
+    check_drop(setgid(dopt.user.pw->pw_gid));
 #endif
-    if (setrv && errno == EPERM) {
-	setrv = 0;		/* Assume already restricted by system policy */
-    }
 
 #ifdef HAVE_SETRESUID
-    setrv = setrv || setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid);
+    check_drop(setresuid(dopt.user.pw->pw_uid, dopt.user.pw->pw_uid,
+                         dopt.user.pw->pw_uid));
 #elif defined(HAVE_SETREUID)
-    setrv = setrv || setreuid(pw->pw_uid, pw->pw_uid);
+    check_drop(setreuid(dopt.user.pw->pw_uid, dopt.user.pw->pw_uid));
 #else
     /* Important: setuid() must come first */
-    setrv = setrv || setuid(pw->pw_uid) ||
-        (geteuid() != pw->pw_uid && seteuid(pw->pw_uid));
+    check_drop(setuid(dopt.user.pw->pw_uid));
+    if (geteuid() != dopt.user.pw->pw_uid)
+        check_drop(seteuid(dopt.user.pw->pw_uid));
 #endif
-    if (setrv && errno == EPERM) {
-	setrv = 0;		/* Assume already restricted by system policy */
-    }
 
-    if (setrv) {
-        tftpd_log(LOG_ERR, "cannot drop privileges: %s", strerror(errno));
-        exit(EX_OSERR);
-    }
+    cap_set_none();
 
     /* Process the request... */
-    if (pick_port_bind(peer, &myaddr)) {
-        tftpd_log(LOG_ERR, "bind: %s", strerror(errno));
-        exit(EX_IOERR);
-    }
 
     if (connect(peer, &from.sa, sizeof from) < 0) {
         tftpd_log(LOG_ERR, "connect: %s", strerror(errno));

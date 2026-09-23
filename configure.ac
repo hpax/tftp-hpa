@@ -203,7 +203,6 @@ AC_CHECK_FUNCS(mempcpy)
 AC_CHECK_FUNCS(strnlen)
 AC_CHECK_FUNCS(vasprintf)
 
-
 AS_IF([$XTRA], [XTRALIBS="$OBJROOT/lib/libxtra.a $XTRALIBS"])
 
 dnl
@@ -237,6 +236,11 @@ PA_ARG_DISABLED([remap],
   [AC_SEARCH_LIBS(regcomp, [regex rx],
    [AC_DEFINE([WITH_REGEX], 1,
 	     [Define if we are compiling with regex filename remapping.])])])])
+
+AC_CHECK_HEADERS_ONCE([sys/capability.h])
+AS_IF([test x"$ac_cv_header_sys_capability_h" = xyes],
+[AC_SEARCH_LIBS(cap_set_proc, [cap])
+AC_CHECK_FUNCS(cap_set_proc)])
 
 TFTPD_LIBS="$LIBS $XTRALIBS"
 LIBS="$common_libs"

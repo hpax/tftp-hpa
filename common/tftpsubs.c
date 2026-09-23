@@ -232,7 +232,7 @@ int tftp_recv_time(int s, void *rbuf, int len, unsigned int flags,
 
 int pick_port_bind(int sockfd, union sock_addr *myaddr)
 {
-    if (xopt.portrange_from | xopt.portrange_to) {
+    if (xopt.portrange_from) {
         uint16_t port, firstport;
 
         port = firstport = xopt.portrange_from

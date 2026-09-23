@@ -47,7 +47,6 @@ struct daemon_options {
     intmax_t waittime;
     mode_t my_umask;
     const char *service;
-    const char *user;
     const char *path_prefix;
     const char *rewrite_file;
     const char *map_test_file;
@@ -56,6 +55,10 @@ struct daemon_options {
     int ndirs;
     const char * const **dirs;
     enum normalizations normalize;
+    struct user_info {
+        const char *name;       /* User name */
+        struct passwd *pw;      /* Corresponding password entry */
+    } user;
 };
 
 extern struct daemon_options dopt;
