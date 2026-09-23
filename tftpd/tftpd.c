@@ -1736,6 +1736,11 @@ static void negotiate_timeout(void)
         tos->flags |= POF_ACK;
     if (tou)
         tou->flags |= POF_ACK;
+
+    if (to) {
+        rexmtval = timeout = to;
+        maxtimeout = rexmtval * TIMEOUT_LIMIT;
+    }
 }
 
 static void negotiate_rollover(void)

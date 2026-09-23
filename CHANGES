@@ -28,9 +28,9 @@ Changes in 7.2:
 	(address) argument, or when an address argument contains a :
 	but no service name/port number.
 
-	tftpd: fix a serious bug in options negotiation, where certain
-	very small or very large block sizes could be misinterpreted
-	as a timeout value.
+	tftpd: fix a serious bug in options negotiation, which could
+	cause an invalid block size to be returned to the client and
+	prevented the timeout options from working at all.
 
 
 Changes in 7.1:
