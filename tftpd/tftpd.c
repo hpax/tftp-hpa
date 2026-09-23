@@ -1706,8 +1706,8 @@ static void negotiate_tsize(void)
 
 static void negotiate_timeout(void)
 {
-    struct daemon_protocol_option *tos = opt_requested(PO_BLKSIZE);
-    struct daemon_protocol_option *tou = opt_requested(PO_BLKSIZE2);
+    struct daemon_protocol_option *tos = opt_requested(PO_TIMEOUT);
+    struct daemon_protocol_option *tou = opt_requested(PO_UTIMEOUT);
     unsigned long to = 0;
     unsigned long tos_us = 0;
 
