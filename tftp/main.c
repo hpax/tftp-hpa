@@ -1004,7 +1004,7 @@ static int parse_rexmtval(const char *str, FILE *errf)
     errno = 0;
     t = strtod(str, &ep);
     /* Careful here: keep in mind unordered values! */
-    if (!errno && t >= mini && t <= maxi) {
+    if (!errno && ep != str && !*ep && t >= mini && t <= maxi) {
         xopt.rexmtval   = t * USEC_PER_SEC;
         copt.maxtimeout = xopt.rexmtval * TIMEOUT_LIMIT;
     } else {
@@ -1040,7 +1040,7 @@ static int parse_timeout(const char *str, FILE *errf)
     errno = 0;
     t = strtod(str, &ep);
     /* Careful here: keep in mind unordered values! */
-    if (!errno && t >= mini && t <= maxi) {
+    if (!errno && ep != str && !*ep && t >= mini && t <= maxi) {
         copt.maxtimeout = t * USEC_PER_SEC + 1.0;
     } else {
         fprintf(errf, "Bad value (range %g-%g): %s\n", mini, maxi, str);
