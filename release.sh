@@ -54,7 +54,9 @@ make release
 rm -f release.sh
 cd ..
 tar cvvf $releasedir.tar $releasedir
+gpg -ab $releasedir.tar
+xz -9ek $releasedir.tar
 gzip -9 $releasedir.tar
-mv -f $releasedir.tar.gz $here/..
+mv -f $releasedir.tar.* $here/..
 cd ..
 rm -rf $tmpdir
