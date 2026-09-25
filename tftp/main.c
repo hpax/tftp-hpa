@@ -83,6 +83,7 @@ static int margc;
 static char *margv[MARGVSIZE];
 static const char *const prompt = "tftp> ";
 sigjmp_buf toplevel;
+
 static void intr(int);
 
 static void help_init(void);
@@ -121,7 +122,7 @@ static void getusage(const char *);
 static int makeargv(char *, char **);
 static uintmax_t parse_uint_range(const char *, uintmax_t, uintmax_t);
 static void putusage(const char *);
-static void settftpmode(const struct modes *);
+static int settftpmode(const struct modes *mode, bool printmsg);
 
 struct cmd {
     const char *name;
@@ -442,10 +443,10 @@ int main(int argc, char *argv[])
             print_configuration(stdout);
             exit(0);
         case 'b':
-            settftpmode(MODE_OCTET);
+            settftpmode(MODE_OCTET, false);
             break;
         case 'a':
-            settftpmode(MODE_NETASCII);
+            settftpmode(MODE_NETASCII, false);
             break;
         case 'l':
             copt.literal = true;
@@ -458,9 +459,7 @@ int main(int argc, char *argv[])
                 if (!strcmp(optarg, p->m_name))
                     break;
             }
-            if (p->m_name) {
-                settftpmode(p);
-            } else {
+            if (settftpmode(p, false)) {
                 fprintf(stderr, "%s: invalid mode: %s\n", argv[0], optarg);
                 exit(EX_USAGE);
             }
@@ -647,10 +646,8 @@ static int modecmd(int argc, char *argv[])
         for (p = modes; p->m_name; p++)
             if (strcmp(argv[1], p->m_name) == 0)
                 break;
-        if (p->m_name) {
-            settftpmode(p);
+        if (!settftpmode(p, true))
             return 0;
-        }
         printf("%s: unknown mode\n", argv[1]);
         /* drop through and print usage message */
     }
@@ -670,23 +667,24 @@ static int setbinary(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
-    settftpmode(MODE_OCTET);
-    return 0;
+    return settftpmode(MODE_OCTET, true);
 }
 
 static int setascii(int argc, char *argv[])
 {
     (void)argc;
     (void)argv;                 /* Quiet unused warning */
-    settftpmode(MODE_NETASCII);
-    return 0;
+    return settftpmode(MODE_NETASCII, true);
 }
 
-static void settftpmode(const struct modes *newmode)
+static int settftpmode(const struct modes *newmode, bool printmsg)
 {
+    if (!newmode)
+        return EX_USAGE;
     copt.mode = newmode;
-    if (copt.verbose)
-        printf("mode set to %s\n", copt.mode->m_mode);
+    if (printmsg && copt.verbose)
+        printf("Mode set to %s\n", newmode->m_name);
+    return 0;
 }
 
 /*
@@ -843,8 +841,7 @@ static int putfiles(int argc, char *argv[], bool target_is_directory)
         sprintf(remotepath, "%s/%s", targ, base);
         fd = open(argv[n], O_RDONLY | copt.mode->m_openflags);
         if (fd < 0) {
-            fprintf(stderr, "tftp: ");
-            perror(argv[n]);
+            fprintf(stderr, "%s: %s: %s", _progname, argv[n], strerror(errno));
             free(remotepath);
             if (!err)
                 err = EX_OSERR;
@@ -933,8 +930,7 @@ static int getfiles(int argc, char *argv[], const char *local_directory)
             fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                       0666);
             if (fd < 0) {
-                fprintf(stderr, "tftp: ");
-                perror(cp);
+                fprintf(stderr, "%s: %s: %s\n", _progname, cp, strerror(errno));
                 return EX_OSERR;
             }
             if (copt.verbose)
@@ -954,8 +950,7 @@ static int getfiles(int argc, char *argv[], const char *local_directory)
         fd = open(cp, O_WRONLY | O_CREAT | O_TRUNC | copt.mode->m_openflags,
                   0666);
         if (fd < 0) {
-            fprintf(stderr, "tftp: ");
-            perror(cp);
+            fprintf(stderr, "%s: %s: %s\n", _progname, cp, strerror(errno));
             if (!err)
                 err = EX_OSERR;
             if (local_directory)

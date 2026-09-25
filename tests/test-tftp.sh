@@ -253,7 +253,7 @@ test_download() {
 # Test file upload (client sends)
 test_upload() {
     local filename="$1"
-    local -a tftp_options=(-B $BLKSIZE -W $WINSIZE "${@:2}")
+    local -a tftp_options=(-v -B $BLKSIZE -W $WINSIZE "${@:2}")
     local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$UL_DIR"
