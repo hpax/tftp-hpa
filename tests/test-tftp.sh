@@ -24,6 +24,7 @@ UL_DIR="$TESTROOT/upload"
 PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
 TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
 TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-mtu mtu-16 512 1468 9001 65464 199}"
+VERBOSE="${VERBOSE:-0}"
 
 trap 'exit 127' INT TERM
 trap 'cleanup' EXIT
@@ -110,7 +111,8 @@ start_server() {
 	TFTPD_CMD+=(strace -o "$STRACE_LOG" -f)
     fi
 
-    TFTPD_CMD+=("$TFTPD" --stderr -vv -L -p --port-range $PORTRANGE)
+    TFTPD_CMD+=("$TFTPD" --verbosity $VERBOSE --stderr -vv -L
+		-p --port-range $PORTRANGE)
     if [ $ANYADDR -ne 0 ]; then
 	if [ $PORT -ne 69 ]; then
 	    TFTPD_CMD+=(-a :$PORT)
@@ -198,7 +200,8 @@ create_test_files() {
 # Test file download (client receives)
 test_download() {
     local filename="$1"
-    local -a tftp_options=(-v -B $BLKSIZE -W $WINSIZE "${@:2}")
+    local -a tftp_options=(--verbosity $VERBOSE
+			   -B $BLKSIZE -W $WINSIZE "${@:2}")
     local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$DL_DIR"
@@ -253,7 +256,8 @@ test_download() {
 # Test file upload (client sends)
 test_upload() {
     local filename="$1"
-    local -a tftp_options=(-v -B $BLKSIZE -W $WINSIZE "${@:2}")
+    local -a tftp_options=(--verbosity $VERBOSE
+			   -B $BLKSIZE -W $WINSIZE "${@:2}")
     local logfile="$TESTROOT/tftp.log"
 
     mkdir -p "$UL_DIR"
