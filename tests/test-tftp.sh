@@ -22,6 +22,7 @@ FILES_DIR="$TESTROOT/files"
 DL_DIR="$TESTROOT/download"
 UL_DIR="$TESTROOT/upload"
 PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
+TFTPD_LOG="$SCRIPT_DIR/tftpd.log"
 TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
 TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-mtu mtu-16 512 1468 9001 65464 199}"
 VERBOSE="${VERBOSE:-0}"
@@ -125,7 +126,7 @@ start_server() {
     fi
     TFTPD_CMD+=(-c --jail "$SERVER_DIR")
     print_info "${TFTPD_CMD[*]}"
-    "${TFTPD_CMD[@]}" &
+    "${TFTPD_CMD[@]}" 1>&2 2>"$TFTPD_LOG" &
     TFTPD_PID=$!
 
     # Wait for server to start
