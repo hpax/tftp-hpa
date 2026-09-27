@@ -328,6 +328,7 @@ static void usage(int errcode)
             "    -6. --ipv6                 only use IPv6, no IPv4\n"
 #endif
             "    -v, --verbose              increase logging verbosity\n"
+            "        --verbosity level      set logging verbosity level\n"
             "    -l, --literal              disable host:path syntax\n"
             "    -m, --mode mode            set the transfer mode (netascii, octet)\n"
             "    -a, --ascii                alias for --mode netascii\n"
@@ -364,10 +365,15 @@ parse_uint_range(const char *arg, uintmax_t minimum, uintmax_t maximum)
     return parsed;
 }
 
+enum long_only_options {
+    OPT_VERBOSITY	= 256
+};
+
 static const struct option long_options[] = {
     { "ipv4",       no_argument,       NULL, '4' },
     { "ipv6",       no_argument,       NULL, '6' },
     { "verbose",    no_argument,       NULL, 'v' },
+    { "verbosity",  required_argument, NULL, OPT_VERBOSITY },
     { "version",    no_argument,       NULL, 'V' },
     { "literal",    no_argument,       NULL, 'l' },
     { "mode",       required_argument, NULL, 'm' },
@@ -432,11 +438,10 @@ int main(int argc, char *argv[])
 #endif
             break;
         case 'v':
-            if (optarg && *optarg) {
-                set_verbosity(optarg, true);
-            } else {
-                copt.verbose++;
-            }
+            copt.verbose++;
+            break;
+        case OPT_VERBOSITY:
+            set_verbosity(optarg, true);
             break;
         case 'V':
             /* Print version and configuration to stdout and exit */
