@@ -22,7 +22,7 @@ tftpd.8: tftpd.8.in ../version
 
 install: all
 	mkdir -p $(INSTALLROOT)$(SBINDIR) $(INSTALLROOT)$(MANDIR)/man8
-	$(INSTALL_PROGRAM) tftpd$(X) $(INSTALLROOT)$(SBINDIR)/in.tftpd
+	$(INSTALL_PROGRAM) tftpd$(X) $(INSTALLROOT)$(SBINDIR)/in.tftpd$(X)
 	$(INSTALL_DATA)    tftpd.8 $(INSTALLROOT)$(MANDIR)/man8/in.tftpd.8
 	cd $(INSTALLROOT)$(MANDIR)/man8 && $(LN_S) -f in.tftpd.8 tftpd.8
 
