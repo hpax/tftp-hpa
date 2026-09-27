@@ -25,6 +25,12 @@ enum normalizations {
     NORM_PATH
 };
 
+enum log_type {
+    LOG_SYS,
+    LOG_STDOUT,
+    LOG_STDERR
+};
+
 struct daemon_options {
     bool readonly;
     bool cancreate;
@@ -37,7 +43,8 @@ struct daemon_options {
     bool systemd;
     bool reject_all_options;
     bool spec_umask;
-    bool use_stderr;
+    enum log_type log_type;
+    bool log_tagged;
     uintmax_t max_upload;
     uintmax_t max_windowbytes;
     int verbosity;

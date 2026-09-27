@@ -103,6 +103,7 @@ static struct tsize {
 } tsize;
 
 struct daemon_options dopt = {
+    .log_type = LOG_SYS,
     .max_windowbytes = MAX_WINDOWBYTES,
     .map_steps = DAEMON_DEFAULT_MAP_STEPS,
     .waittime = -1,
@@ -231,67 +232,6 @@ static void timer(int sig)
     if (timeout >= maxtimeout || timeout_quit)
         exit(0);
     siglongjmp(*active_timeoutbuf, 1);
-}
-
-static const char *prio_name(int priority)
-{
-    switch (priority) {
-    case LOG_EMERG:
-        return "emergency: ";
-    case LOG_ALERT:
-        return "alert: ";
-    case LOG_CRIT:
-        return "critical: ";
-    case LOG_ERR:
-        return "error: ";
-    case LOG_WARNING:
-        return "warning: ";
-    case LOG_NOTICE:
-        return "notice: ";
-    case LOG_INFO:
-        return "info: ";
-    case LOG_DEBUG:
-        return "debug: ";
-    default:
-        return "";
-    }
-}
-
-static void tftpd_log_stderr(int priority, const char *fmt, ...)
-{
-    va_list ap;
-
-    fprintf(stderr, "%s[%lu]: %s",
-            _progname ? _progname : "tftpd",
-            (unsigned long)_progpid,
-            prio_name(priority));
-
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    putc('\n', stderr);
-}
-
-static void tftpd_reopenlog_stderr(void)
-{
-    fflush(stderr);             /* Should normally be a noop */
-}
-
-log_func tftpd_log = tftpd_log_stderr;
-static void (*tftpd_reopenlog)(void) = tftpd_reopenlog_stderr;
-
-static void tftpd_openlog(void);
-
-static void tftpd_reopenlog_syslog(void)
-{
-    closelog();
-    tftpd_openlog();
-}
-static void tftpd_openlog(void)
-{
-    openlog(_progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
-    tftpd_log = syslog;
-    tftpd_reopenlog = tftpd_reopenlog_syslog;
 }
 
 #ifdef WITH_REGEX
@@ -492,7 +432,9 @@ static enum normalizations parse_normalize(const char *str)
 
 enum long_only_options {
     OPT_VERBOSITY	= 256,
+    OPT_SYSLOG,
     OPT_STDERR,
+    OPT_STDOUT,
     OPT_MAP_TEST,
     OPT_MAP_STEPS,
     OPT_SYSTEMD,
@@ -502,7 +444,8 @@ enum long_only_options {
     OPT_NORMALIZE,
     OPT_VALIDATE,
     OPT_READONLY,
-    OPT_MAX_UPLOAD
+    OPT_MAX_UPLOAD,
+    OPT_LOG
 };
 
 static const struct option long_options[] = {
@@ -538,7 +481,9 @@ static const struct option long_options[] = {
     { "map-file",    1, NULL, 'm' },
     { "map-steps",   1, NULL, OPT_MAP_STEPS },
     { "pidfile",     1, NULL, 'P' },
-    { "stderr",      0, NULL, OPT_STDERR },
+    { "syslog",      0, NULL, OPT_SYSLOG },
+    { "stderr",      2, NULL, OPT_STDERR },
+    { "stdout",      2, NULL, OPT_STDOUT },
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { "normalize",   2, NULL, OPT_NORMALIZE },
@@ -598,6 +543,7 @@ int main(int argc, char **argv)
     int nullfd;
 
     set_progname(argv[0]);
+    tftpd_initlog();
     out_of_memory = tftpd_out_of_memory;
 
     capset_none();
@@ -792,7 +738,8 @@ int main(int argc, char **argv)
         }
         case OPT_MAP_TEST:
             dopt.map_test_file = optarg;
-            dopt.use_stderr = true;
+            dopt.log_type = LOG_STDERR;
+            dopt.log_tagged = false;
             break;
         case 'v':
             dopt.verbosity++;
@@ -800,8 +747,20 @@ int main(int argc, char **argv)
         case OPT_VERBOSITY:
             dopt.verbosity = atoi(optarg);
             break;
+        case OPT_SYSLOG:
+            dopt.log_type = LOG_SYS;
+            break;
         case OPT_STDERR:
-            dopt.use_stderr = true;
+            dopt.log_type = LOG_STDERR;
+            goto log_arg;
+        case OPT_STDOUT:
+            dopt.log_type = LOG_STDOUT;
+            goto log_arg;
+        log_arg:
+            dopt.log_tagged =
+                optarg &&
+                (ascii_strcaseeq(optarg, "tag") ||
+                 ascii_strcaseeq(optarg, "tagged"));
             break;
         case OPT_SYSTEMD:
             dopt.nodaemon = true;
@@ -855,8 +814,7 @@ int main(int argc, char **argv)
     if (!dopt.max_upload)
         dopt.readonly = true;
 
-    if (!dopt.use_stderr)
-        tftpd_openlog();
+    tftpd_openlog();
 
 #ifdef WITH_REGEX
     if (dopt.rewrite_file)
@@ -1068,10 +1026,10 @@ int main(int argc, char **argv)
         }
     }
 
+    /* Block out stdin/stdout/stderr */
     dup2(nullfd, 0);
     dup2(nullfd, 1);
-    if (!dopt.use_stderr)
-        dup2(nullfd, 2);
+    dup2(nullfd, 2);
 
     if (dopt.pidfile) {
         FILE *pf = fopen(dopt.pidfile, "w");
@@ -1230,6 +1188,7 @@ int main(int argc, char **argv)
          * Now that we have read the request packet from the UDP
          * socket, we fork and go back to listening to the socket.
          */
+        fflush(NULL);
         pid = fork();
         if (pid < 0) {
             tftpd_log(LOG_ERR, "fork: %s", strerror(errno));

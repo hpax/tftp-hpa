@@ -457,8 +457,18 @@ and
 .I max-port
 values must be decimal numbers between 1 and 65535.
 .TP
-\fB\-\-stderr\fP
-Log messages to standard error instead of syslog.
+\fB\-\-stderr\fP[=\fBtag\fP]
+Send log messages to standard error instead of syslog. With the optional
+.B "=tag"
+suffix, add machine-readable priority tags.
+.TP
+\fB\-\-stdout\fP[=\fBtag\fP]
+Send log messages to standard output instead of syslog. With the optional
+.B "=tag"
+suffix, add machine-readable priority tags.
+.TP
+\fB\-\-syslog\fP
+Send log messages to syslog. This is the default.
 .TP
 \fB\-\-systemd\fP
 Use

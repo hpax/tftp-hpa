@@ -16,7 +16,17 @@
 #include "common/pollset.h"
 
 typedef PRINTF_FUNC(2,3) void (*log_func)(int, const char *, ...);
-extern log_func tftpd_log;
+
+struct tftpd_log_ops {
+    log_func log;
+    void (*open_log)(FILE *);
+    void (*reopen_log)(void);
+};
+extern const struct tftpd_log_ops *log_ops;
+#define tftpd_log	(log_ops->log)
+#define tftpd_reopenlog	(log_ops->reopen_log)
+void tftpd_initlog(void);
+void tftpd_openlog(void);
 
 void set_signal(int, void (*)(int), int);
 void tftpd_sigmask(int how, const sigset_t *set, sigset_t *oset);

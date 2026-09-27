@@ -124,7 +124,7 @@ start_server() {
 	TFTPD_CMD+=(strace -o "$STRACE_LOG" -f)
     fi
 
-    TFTPD_CMD+=("$TFTPD" --verbosity $VERBOSE --stderr -vv -L
+    TFTPD_CMD+=("$TFTPD" --verbosity $VERBOSE --stderr -L
 		-p --port-range $PORTRANGE)
     if [ $ANYADDR -ne 0 ]; then
 	if [ $PORT -ne 69 ]; then
@@ -139,7 +139,7 @@ start_server() {
     TFTPD_CMD+=(-c --jail "$SERVER_DIR")
     print_info "${TFTPD_CMD[*]}"
     if [ -n "$TFTPD_LOG" ]; then
-	"${TFTPD_CMD[@]}" 1>&2 2>"$TFTPD_LOG" &
+	"${TFTPD_CMD[@]}" >"$TFTPD_LOG" 2>&1 &
     else
 	"${TFTPD_CMD[@]}" &
     fi
