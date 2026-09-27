@@ -3,32 +3,44 @@
 # TFTP Client-Server Test Script
 # Tests bidirectional file transfer with an ephemeral TFTP server
 #
-# Usage: ./test-tftp.sh
+# Usage: ./test-tftp.sh [-q|-qq|-qqq]
 #
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-TFTPD="${TFTPD:-$REPO_ROOT/tftpd/tftpd}"
+TFTPD="${TFTPD:-${REPO_ROOT}/tftpd/tftpd}"
 TFTP="${TFTP:-${REPO_ROOT}/tftp/tftp}"
 PORT="${PORT:-6969}"
 PORTRANGE="${PORTRANGE:-60969:60999}"
 LOCALHOSTS="${LOCALHOSTS:-127.0.0.1 ::1}"
 ANYADDR="${ANYADDR:-0}"
-TSIZE="${TSIZE:-1}"
+TSIZE="${TSIZE-1}"
 TESTROOT=$(mktemp -d)
 SERVER_DIR="$TESTROOT"
 FILES_DIR="$TESTROOT/files"
 DL_DIR="$TESTROOT/download"
 UL_DIR="$TESTROOT/upload"
-PCAP_LOG="$SCRIPT_DIR/test-tftp.pcap.gz"
-TFTPD_LOG="$SCRIPT_DIR/tftpd.log"
+PCAP="${PCAP-1}"
+PCAP_LOG="${PCAP_LOG-$SCRIPT_DIR/test-tftp.pcap.gz}"
+TFTPD_LOG="${TFTPD_LOG-$SCRIPT_DIR/tftpd.log}"
 TFTP_TEST_WINSIZES="${TFTP_TEST_WINSIZES:-1 4 64 256}"
 TFTP_TEST_BLKSIZES="${TFTP_TEST_BLKSIZES:-mtu mtu-16 512 1468 9001 65464 199}"
 VERBOSE="${VERBOSE:-0}"
+QUIET="${QUIET:-0}"
 
 trap 'exit 127' INT TERM
 trap 'cleanup' EXIT
+
+# Output verbosity level
+for arg; do
+    case "$arg" in
+	-q) QUIET=$((QUIET+1)) ;;
+	-qq) QUIET=$((QUIET+2)) ;;
+	-qqq) QUIET=$((QUIET+3)) ;;
+	*) echo "Unknown option: $arg" 1>&2; exit 64 ;;
+    esac
+done
 
 # Color output helpers
 RED='\033[0;31m'
@@ -40,15 +52,15 @@ time=$(type -P time)
 export TIME="${YELLOW}[TIME]${NC} real %e user %U sys %s\\n"
 
 print_info() {
-    echo -e "${YELLOW}[INFO]${NC} $*"
+    [ $QUIET -lt 1 ] && echo -e "${YELLOW}[INFO]${NC} $*"
 }
 
 print_success() {
-    echo -e "${GREEN}[PASS]${NC} $*"
+    [ $QUIET -lt 2 ] && echo -e "${GREEN}[PASS]${NC} $*"
 }
 
 print_error() {
-    echo -e "${RED}[FAIL]${NC} $*"
+    [ $QUIET -lt 3 ] && echo -e "${RED}[FAIL]${NC} $*"
 }
 
 # Print the difference between two fractional timestamps
@@ -126,7 +138,11 @@ start_server() {
     fi
     TFTPD_CMD+=(-c --jail "$SERVER_DIR")
     print_info "${TFTPD_CMD[*]}"
-    "${TFTPD_CMD[@]}" 1>&2 2>"$TFTPD_LOG" &
+    if [ -n "$TFTPD_LOG" ]; then
+	"${TFTPD_CMD[@]}" 1>&2 2>"$TFTPD_LOG" &
+    else
+	"${TFTPD_CMD[@]}" &
+    fi
     TFTPD_PID=$!
 
     # Wait for server to start
@@ -142,20 +158,22 @@ start_server() {
 
     me=$(whoami)
 
-    # If the user has access to tshark, dump a packet trace
+    # If the user has tshark, dump a packet trace if enabled
     rm -f "$PCAP_LOG"
-    local dumphosts=$(echo "$LOCALHOSTS" | \
-			  sed -E -e 's/([^[:space:]]*:[^[:space:]]*)/[\1]/g' \
-			  -e "s/([^[:space:]]+)/or host \\1/g" \
-			  -e 's/^or //')
-	   tshark -q -Q -i lo -n -w "$PCAP_LOG" \
-	   -f "udp port $PORT or portrange ${PORTRANGE/:/-}" \
-	   1>&2 2>/dev/null &
-    TSHARK_PID=$!
-    if kill -0 "$TSHARK_PID" 2>/dev/null; then
-	print_info "dumping packets to: $PCAP_LOG"
-    else
-	unset TSHARK_PID
+    if [ 0"$PCAP" -ne 0 ]; then
+	local dumphosts=$(echo "$LOCALHOSTS" | \
+			      sed -E -e 's/([^[:space:]]*:[^[:space:]]*)/[\1]/g' \
+				  -e "s/([^[:space:]]+)/or host \\1/g" \
+				  -e 's/^or //')
+	tshark -q -Q -i lo -n -w "$PCAP_LOG" \
+	       -f "udp port $PORT or portrange ${PORTRANGE/:/-}" \
+	       1>&2 2>/dev/null &
+	TSHARK_PID=$!
+	if kill -0 "$TSHARK_PID" 2>/dev/null; then
+	    print_info "dumping packets to: $PCAP_LOG"
+	else
+	    unset TSHARK_PID
+	fi
     fi
 }
 
