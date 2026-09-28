@@ -13,7 +13,7 @@ StateDirectory=%S/tftpboot
 Environment=TFTPD_ACCESS_OPTS="--permissive --read-only"
 # --------------------------------------------------------------------------
 # For a read/write server enable/tweak this
-# Environment=TFTPD_ACCESS_OPTS="--permissive --create --max-upload 1048576"
+# Environment=TFTPD_ACCESS_OPTS="--permissive --create --umask 022 --max-upload 1048576"
 # ReadWritePaths=%S/tftpboot
 # --------------------------------------------------------------------------
 # Network tweakables
