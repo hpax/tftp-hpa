@@ -1,0 +1,29 @@
+[Unit]
+Description=tftpd-hpa TFTP Server
+Documentation=man:in.tftpd
+Requires=tftp.socket
+After=network-online.target
+
+[Service]
+ReadWritePaths=/var/lib/tftpboot
+Environment=TFTPD_HOME=/var/lib/tftpboot
+Environment=TFTPD_OPTS=
+User=tftp
+ExecStart=/usr/sbin/in.tftpd $TFTPD_OPTS --systemd --jail ${TFTPD_HOME}
+ProtectHome=yes
+ProtectSystem=strict
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+PrivateDevices=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+Also=tftp.socket

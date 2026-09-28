@@ -1,0 +1,9 @@
+[Unit]
+Description=tftpd-hpa TFTP Server Socket
+
+[Socket]
+FreeBind=yes
+ListenDatagram=69
+
+[Install]
+WantedBy=sockets.target
