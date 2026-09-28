@@ -47,7 +47,6 @@ config:	config/MCONFIG config/config.h
 
 release:
 	$(MAKE) autoconf
-	$(MAKE) tftp.spec
 	$(MAKE) distclean
 
 config/MCONFIG: configure config/MCONFIG.in config/config.h.in
@@ -68,6 +67,3 @@ config/config.h.in: configure
 
 version.h: version
 	echo \#define VERSION \"tftp-hpa `cat version`\" > version.h
-
-tftp.spec: tftp.spec.in version
-	sed -e "s/@@VERSION@@/`cat version`/g" < $< > $@ || rm -f $@
