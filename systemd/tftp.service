@@ -5,11 +5,22 @@ Requires=tftp.socket
 After=network-online.target
 
 [Service]
-ReadWritePaths=/var/lib/tftpboot
-Environment=TFTPD_HOME=/var/lib/tftpboot
-Environment=TFTPD_OPTS=
+# --------------------------------------------------------------------------
+# Location of tftp files
+StateDirectory=%S/tftpboot
+# --------------------------------------------------------------------------
+# For a readonly server enable/tweak this
+Environment=TFTPD_ACCESS_OPTS="--permissive --read-only"
+# --------------------------------------------------------------------------
+# For a read/write server enable/tweak this
+# Environment=TFTPD_ACCESS_OPTS="--permissive --create --max-upload 1048576"
+# ReadWritePaths=%S/tftpboot
+# --------------------------------------------------------------------------
+# Network tweakables
+Environment=TFTPD_NET_OPTS="--blocksize mtu"
+# --------------------------------------------------------------------------
 User=tftp
-ExecStart=/usr/sbin/in.tftpd $TFTPD_OPTS --systemd --jail ${TFTPD_HOME}
+ExecStart=/usr/sbin/in.tftpd ${TFTPD_NET_OPTS} ${TFTPD_ACCESS_OPTS} --systemd --jail ${STATE_DIRECTORY}
 ProtectHome=yes
 ProtectSystem=strict
 ProtectHostname=yes
