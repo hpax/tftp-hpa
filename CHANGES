@@ -1,3 +1,20 @@
+Changes in 7.3:
+	tftp: add --verbosity option to match tftpd, remove the
+	never-working option to --verbose (incorrectly implemented,
+	never worked.)
+
+	tests: add better controls for logging, tracing and verbosity.
+
+	tftpd: add example configuration files for systemd activation.
+
+	tftpd: allow logging to stdout as well as stderr, and allow
+	logs to have standard machine-readable <#> priority level
+	prefixes.
+
+	tftpd: keep the executable suffix (e.g. ".exe") when running
+	"make install" on a platform which uses suffixed executables.
+
+
 Changes in 7.2:
 	tftpd: the server now only accepts 0 and 1 as valid values for
 	the "rollover" option. Earlier versions accepted any 16-bit
