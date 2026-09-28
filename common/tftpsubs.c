@@ -123,39 +123,6 @@ unsigned int tftp_max_blksize(int fd, const union sock_addr *sa)
     return mtu;
 }
 
-bool parse_blocksize_arg(const char *str, unsigned int minimum)
-{
-    char *vp;
-    bool ok = false;
-    unsigned long v;
-    int blksize = 0;
-
-    if (ascii_strncaseeq(str, "mtu", 3)) {
-        switch (str[3]) {
-        case '\0':
-            blksize = 0;
-            ok = true;
-            break;
-        case '-':
-            v = strtoul(str+4, &vp, 10);
-            blksize = -v;
-            ok = !*vp && (v <= INT_MAX/2);
-            break;
-        default:
-            ok = true;
-            break;
-        }
-    } else if (*str) {
-        blksize = v = strtoul(str, &vp, 10);
-        ok = v >= minimum && v <= MAX_SEGSIZE && !*vp;
-    }
-
-    if (ok)
-        xopt.blksize = blksize;
-
-    return ok;
-}
-
 /*
  * Wrappers for getsockopt() for the case where the option is an int.
  */

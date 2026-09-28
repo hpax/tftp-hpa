@@ -11,7 +11,7 @@ include ../MRULES
 
 OBJS = tftpsubs.$(O) tftp-xfer.$(O) tftp-io.$(O) signal.$(O) \
 	xalloc.$(O) xasprintf.$(O) progname.$(O) pollset.$(O) \
-	clock.$(O) address.$(O) random.$(O) error.$(O)
+	clock.$(O) address.$(O) random.$(O) error.$(O) parsenum.$(O)
 LIB  = libcommon.a
 
 all: $(LIB)

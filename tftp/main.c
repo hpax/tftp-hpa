@@ -120,7 +120,6 @@ static void command(void);
 
 static void getusage(const char *);
 static int makeargv(char *, char **);
-static uintmax_t parse_uint_range(const char *, uintmax_t, uintmax_t);
 static void putusage(const char *);
 static int settftpmode(const struct modes *mode, bool printmsg);
 
@@ -349,22 +348,6 @@ static void usage(int errcode)
     exit(errcode);
 }
 
-#define BAD_NUM ((uintmax_t)(-1))
-
-static uintmax_t
-parse_uint_range(const char *arg, uintmax_t minimum, uintmax_t maximum)
-{
-    char *end;
-    uintmax_t parsed;
-
-    errno = 0;
-    parsed = strtoumax(arg, &end, 10);
-    if (errno || end == arg || *end || parsed < minimum || parsed > maximum)
-        return BAD_NUM;
-
-    return parsed;
-}
-
 enum long_only_options {
     OPT_VERBOSITY	= 256
 };
@@ -491,7 +474,7 @@ int main(int argc, char *argv[])
             break;
         case 'W':
         case 'w':
-            v = parse_uint_range(optarg, 1, TFTP_MAX_WINDOWSIZE);
+            v = parse_uint(optarg, 1, TFTP_MAX_WINDOWSIZE);
             if (v == BAD_NUM) {
                 fprintf(stderr, "Bad window size: %s (valid range is 1-%u)\n",
                         optarg, TFTP_MAX_WINDOWSIZE);
@@ -1100,7 +1083,7 @@ static int setwindowsize(int argc, char *argv[])
         return EX_USAGE;
     }
 
-    v = parse_uint_range(argv[1], 1, TFTP_MAX_WINDOWSIZE);
+    v = parse_uint(argv[1], 1, TFTP_MAX_WINDOWSIZE);
     if (v == BAD_NUM) {
         printf("%s: bad window size (valid range is 1-%u)\n",
                argv[1], TFTP_MAX_WINDOWSIZE);

@@ -88,6 +88,12 @@ static inline void xfree(void *ptr)
 PRINTF_FUNC(2,3) int xasprintf(char **strp, const char *fmt, ...);
 PRINTF_FUNC(2,0) int xvasprintf(char **strp, const char *fmt, va_list ap);
 
+/*
+ * Number-parsing functions with validation and limit checking
+ */
+#define BAD_NUM TYPE_MAX(uintmax_t)
+uintmax_t parse_uint(const char *arg, uintmax_t lo, uintmax_t hi);
+
 #ifndef HAVE_RANDOM
 static inline long random(void)
 {

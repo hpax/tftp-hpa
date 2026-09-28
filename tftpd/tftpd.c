@@ -541,6 +541,7 @@ int main(int argc, char **argv)
     bool patherr;
     pollset_cursor cursor;
     int nullfd;
+    uintmax_t v;
 
     set_progname(argv[0]);
     tftpd_initlog();
@@ -612,7 +613,9 @@ int main(int argc, char **argv)
             strlist_add(&dopt.listen_addrs, optarg);
             break;
         case 't':
-            dopt.waittime = strtoul(optarg, NULL, 10) * (intmax_t)1000000;
+            v = parse_uint(optarg, 0, TYPE_MAX(intmax_t)/USEC_PER_SEC);
+            if (v != BAD_NUM)
+                dopt.waittime = v * USEC_PER_SEC;
             break;
         case 'S':
             if (!optarg || !*optarg) {
@@ -629,54 +632,36 @@ int main(int argc, char **argv)
             }
             break;
         case 'W':
-            {
-                char *vp;
-                long value = strtol(optarg, &vp, 10);
-
-                if (*optarg == '\0' || *vp || value < 0) {
-                    tftpd_log(LOG_ERR,
-                              "Invalid maximum windowsize value: %s\n", optarg);
-                    exit(EX_USAGE);
-                }
-
-                if (value < 1) {
-                    /* Treat -W 0 as -W 1 */
-                    value = 1;
-                } else if (value > MAX_MAX_WINDOWSIZE) {
-                    value = MAX_MAX_WINDOWSIZE;
-                    tftpd_log(LOG_WARNING,
-                              "Bad maximum windowsize value: %s "
-                              "(valid range 1-%u, capping at %ld)",
-                              optarg, (unsigned int)MAX_MAX_WINDOWSIZE, value);
-                }
-                xopt.max_windowsize = (unsigned int)value;
+            v = parse_uint(optarg, 0, MAX_MAX_WINDOWSIZE);
+            if (v == BAD_NUM) {
+                tftpd_log(LOG_ERR,
+                          "Invalid maximum windowsize value (1-%d): %s\n",
+                          MAX_MAX_WINDOWSIZE, optarg);
+                exit(EX_USAGE);
             }
+            if (!v)
+                v = 1;
+            xopt.max_windowsize = v;
             break;
         case OPT_WINDOW_BYTES:
-            {
-                char *vp;
-
-                errno = 0;
-                dopt.max_windowbytes = strtoumax(optarg, &vp, 10);
-                if (errno || *optarg == '\0' || *vp) {
-                    tftpd_log(LOG_ERR, "Bad window-bytes value: %s", optarg);
-                    exit(EX_USAGE);
-                }
+            v = parse_uint(optarg, 0, OFF_T_MAX);
+            if (v == BAD_NUM) {
+                tftpd_log(LOG_ERR, "Bad window-bytes value: %s", optarg);
+                exit(EX_USAGE);
             }
+            dopt.max_windowbytes = v;
             break;
         case 'T':
-            {
-                char *vp;
-                unsigned long tov = strtoul(optarg, &vp, 10);
-                if (tov < MIN_TIMEOUT || tov > MAX_TIMEOUT || *vp) {
-                    tftpd_log(LOG_ERR, "Bad timeout value: %s", optarg);
-                    exit(EX_USAGE);
-                }
-                xopt.rexmtval = tov;
+            v = parse_uint(optarg, MIN_TIMEOUT, MAX_TIMEOUT);
+            if (v == BAD_NUM) {
+                tftpd_log(LOG_ERR, "Bad timeout value: %s", optarg);
+                exit(EX_USAGE);
             }
+            xopt.rexmtval = v;
             break;
         case 'R':
-            if (sscanf(optarg, "%u:%u", &xopt.portrange_from,
+            if (sscanf(optarg, "%u:%u",
+                       &xopt.portrange_from,
                        &xopt.portrange_to) != 2 ||
                 !xopt.portrange_from ||
                 xopt.portrange_from > xopt.portrange_to ||
@@ -689,8 +674,9 @@ int main(int argc, char **argv)
             dopt.user.name = optarg;
             break;
         case 'U':
-            dopt.my_umask = strtoul(optarg, &ep, 8);
-            if (*ep) {
+            errno = 0;
+            dopt.my_umask = strtoul(optarg, &ep, 8); /* Octal!! */
+            if (errno || ep == optarg || *ep) {
                 tftpd_log(LOG_ERR, "Invalid umask: %s", optarg);
                 exit(EX_USAGE);
             }
@@ -726,16 +712,13 @@ int main(int argc, char **argv)
 #endif
             break;
         case OPT_MAP_STEPS:
-        {
-            unsigned long steps = strtoul(optarg, &ep, 0);
-            if (*optarg && !*ep && steps > 0 && steps <= INT_MAX) {
-                dopt.map_steps = steps;
-            } else {
+            v = parse_uint(optarg, 1, INT_MAX);
+            if (v == BAD_NUM) {
                 tftpd_log(LOG_ERR, "Bad --map-steps option: %s", optarg);
                 exit(EX_USAGE);
             }
+            dopt.map_steps = v;
             break;
-        }
         case OPT_MAP_TEST:
             dopt.map_test_file = optarg;
             dopt.log_type = LOG_STDERR;
@@ -745,7 +728,7 @@ int main(int argc, char **argv)
             dopt.verbosity++;
             break;
         case OPT_VERBOSITY:
-            dopt.verbosity = atoi(optarg);
+            dopt.verbosity = parse_uint(optarg, 0, INT_MAX);
             break;
         case OPT_SYSLOG:
             dopt.log_type = LOG_SYS;
@@ -786,18 +769,14 @@ int main(int argc, char **argv)
             dopt.readonly = true;
             break;
         case OPT_MAX_UPLOAD:
-        {
-            uintmax_t v;
-            errno = 0;
-            v = strtoumax(optarg, &ep, 10);
-            if (errno || *optarg == '\0' || *ep || v > (uintmax_t)OFF_T_MAX) {
+            v = parse_uint(optarg, 0, OFF_T_MAX);
+            if (v == BAD_NUM) {
                 tftpd_log(LOG_ERR, "Invalid maximum upload size: %s",
                           optarg);
                 exit(EX_USAGE);
             }
             dopt.max_upload = v;
             break;
-        }
         default:
             tftpd_log(LOG_ERR, "Unknown option: '%c'", optopt);
             break;
