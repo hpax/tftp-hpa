@@ -269,8 +269,10 @@ PA_ARG_DISABLED([readline],
 		dnl editline may need libtermcap or somesuch...
 		AC_SEARCH_LIBS(tputs, [termcap terminfo])
 
-		AC_SEARCH_LIBS(editline, [edit],
-		[AC_DEFINE(WITH_READLINE)])
+		AC_SEARCH_LIBS(readline, [edit],
+		[AC_DEFINE(WITH_READLINE)
+		 AC_DEFINE(HAVE_EDITLINE_READLINE_H, 1,
+		  [Define if readline comes from editline/readline.h.])])
 	])])
 ],:)
 
