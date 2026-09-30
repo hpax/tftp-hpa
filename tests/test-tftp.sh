@@ -305,6 +305,7 @@ test_upload() {
     rm -f "$logfile"
     local start=$(date -u +%s.%N)
     "${TFTP_CMD[@]}"
+    status=$?
     local end=$(date -u +%s.%N)
     print_info time = $(difftime $start $end)
 
