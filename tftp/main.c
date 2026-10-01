@@ -18,9 +18,13 @@
 #include <sys/file.h>
 #include <ctype.h>
 #ifdef WITH_READLINE
+#ifdef HAVE_EDITLINE_READLINE_H
+#include <editline/readline.h>
+#else
 #include <readline/readline.h>
 #ifdef HAVE_READLINE_HISTORY_H
 #include <readline/history.h>
+#endif
 #endif
 #endif
 
