@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 # --------------------------------------------------------------------------
 # Location of tftp files
-StateDirectory=%S/tftpboot
+Environment=TFTPD_HOME=%S/tftpboot
 # --------------------------------------------------------------------------
 # For a readonly server enable/tweak this
 Environment=TFTPD_ACCESS_OPTS="--permissive --read-only"
@@ -20,7 +20,7 @@ Environment=TFTPD_ACCESS_OPTS="--permissive --read-only"
 Environment=TFTPD_NET_OPTS="--blocksize mtu"
 # --------------------------------------------------------------------------
 User=tftp
-ExecStart=/usr/sbin/in.tftpd $TFTPD_NET_OPTS $TFTPD_ACCESS_OPTS --systemd --jail ${STATE_DIRECTORY}
+ExecStart=/usr/sbin/in.tftpd $TFTPD_NET_OPTS $TFTPD_ACCESS_OPTS --systemd --jail ${TFTPD_HOME}
 ProtectHome=yes
 ProtectSystem=strict
 ProtectHostname=yes
