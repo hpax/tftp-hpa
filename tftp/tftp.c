@@ -280,7 +280,7 @@ int tftp_sendfile(int fd, const char *name, const char *mode)
     bool convert = !strcmp(mode, "netascii");
     struct optreq optreq, optack;
     uint16_t ap_opcode, ap_block;
-    unsigned long r_timeout;
+    uintmax_t r_timeout;
     volatile uintmax_t amount = 0;
     struct stat st;
 
