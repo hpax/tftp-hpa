@@ -309,10 +309,7 @@ static inline void *mempcpy(void *dst, const void *src, size_t n)
 #define TYPE_MAX(t)	 TYPE_MKMASK(t, (t)1 << (sizeof(t)*CHAR_BIT-1-IS_SIGNED(t)))
 #define TYPE_MIN(t)	 ((t)~TYPE_MAX(t))
 
-/* off_t and OFF_T_MAX */
-#ifndef HAVE_OFF_T
-typedef long off_t;
-#endif
+/* If OFF_T_MAX isn't defined */
 #ifndef OFF_T_MAX
 #define OFF_T_MAX TYPE_MAX(off_t)
 #endif
