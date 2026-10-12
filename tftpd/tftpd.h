@@ -21,10 +21,12 @@ struct tftpd_log_ops {
     log_func log;
     void (*open_log)(FILE *);
     void (*reopen_log)(void);
+    void (*rotate_log)(void);
 };
 extern const struct tftpd_log_ops *log_ops;
 #define tftpd_log	(log_ops->log)
 #define tftpd_reopenlog	(log_ops->reopen_log)
+#define tftpd_rotatelog (log_ops->rotate_log)
 void tftpd_initlog(void);
 void tftpd_openlog(void);
 

@@ -18,18 +18,22 @@ static void tftpd_log_file(int priority, const char *fmt, ...);
 static void tftpd_log_file_tagged(int priority, const char *fmt, ...);
 static void tftpd_reopenlog_file(void);
 static void tftpd_reopenlog_syslog(void);
+static void tftpd_rotatelog_file(void);
 
 static const struct tftpd_log_ops log_ops_file = {
     .log	= tftpd_log_file,
-    .reopen_log	= tftpd_reopenlog_file
+    .reopen_log	= tftpd_reopenlog_file,
+    .rotate_log = tftpd_rotatelog_file,
 };
 static const struct tftpd_log_ops log_ops_file_tagged = {
     .log	= tftpd_log_file_tagged,
-    .reopen_log	= tftpd_reopenlog_file
+    .reopen_log	= tftpd_reopenlog_file,
+    .rotate_log = tftpd_rotatelog_file,
 };
 static const struct tftpd_log_ops log_ops_syslog = {
     .log	= syslog,
-    .reopen_log	= tftpd_reopenlog_syslog
+    .reopen_log	= tftpd_reopenlog_syslog,
+    .rotate_log = tftpd_reopenlog_syslog,
 };
 
 const struct tftpd_log_ops *log_ops = &log_ops_file;
@@ -91,7 +95,7 @@ static void tftpd_log_file_tagged(int priority, const char *fmt, ...)
  * dup() stdout/stderr when used as log output so that closing the
  * standard descriptors doesn't break anything.
  */
-static void tftpd_openlog_file(int new_fd)
+static void tftpd_openlog_fd(int new_fd)
 {
     FILE *old_fh = log_filehandle;
     int old_fd;
@@ -112,7 +116,7 @@ static void tftpd_openlog_file(int new_fd)
     if (old_fd != new_fd) {
         FILE *new_fh;
 
-        new_fh = fdopen(new_fd, "wt");
+        new_fh = fdopen(new_fd, "at");
         if (new_fh) {
             if (old_fd > 2)
                 fclose(old_fh);
@@ -123,13 +127,39 @@ static void tftpd_openlog_file(int new_fd)
         } else {
             if (new_fd > 2)
                 close(new_fd);
+            fprintf(stderr, "%s: fdopen for logging failed: %s\n",
+                    _progname, strerror(errno));
+            exit(EX_OSERR);
         }
+    }
+}
+
+static void tftpd_openlog_file(bool rotate)
+{
+    const char * const path = dopt.logfile;
+    int fd;
+
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        tftpd_log(rotate ? LOG_ERR : LOG_CRIT,
+                  "cannot %s log file '%s': %s",
+                  rotate ? "reopen" : "open", path, strerror(errno));
+        if (!rotate)
+            exit(EX_CANTCREAT);
+    } else {
+        tftpd_openlog_fd(fd);
     }
 }
 
 static void tftpd_reopenlog_file(void)
 {
     fflush(log_filehandle);
+}
+
+static void tftpd_rotatelog_file(void)
+{
+    if (dopt.log_type == LOG_FILE)
+        tftpd_openlog_file(true);
 }
 
 static void tftpd_openlog_syslog(void)
@@ -158,11 +188,12 @@ void tftpd_openlog(void)
     case LOG_SYS:
         tftpd_openlog_syslog();
         break;
-    case LOG_STDOUT:
-        tftpd_openlog_file(1);
+    case LOG_STDOUT:            /* == 1 */
+    case LOG_STDERR:            /* == 2 */
+        tftpd_openlog_fd(dopt.log_type);
         break;
-    case LOG_STDERR:
-        tftpd_openlog_file(2);
+    case LOG_FILE:
+        tftpd_openlog_file(false);
         break;
     default:
         break;

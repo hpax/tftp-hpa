@@ -467,6 +467,13 @@ Send log messages to standard output instead of syslog. With the optional
 .B "=tag"
 suffix, add machine-readable priority tags.
 .TP
+\fB\-\-logfile\fP \fIfile\fP
+Send log messages to \fIfile\fP instead of syslog. The file is opened
+for appending, and created with mode 0644 if it does not exist. If
+.B tftpd
+is running in standalone (listening) mode, the file will be closed and
+reopened if SIGHUP is received, to allow log file rotation.
+.TP
 \fB\-\-syslog\fP
 Send log messages to syslog. This is the default.
 .TP

@@ -27,8 +27,9 @@ enum normalizations {
 
 enum log_type {
     LOG_SYS,
-    LOG_STDOUT,
-    LOG_STDERR
+    LOG_STDOUT,                 /* MUST BE 1 */
+    LOG_STDERR,                 /* MUST BE 2 */
+    LOG_FILE
 };
 
 struct daemon_options {
@@ -53,6 +54,7 @@ struct daemon_options {
     intmax_t waittime;
     mode_t my_umask;
     const char *service;
+    const char *logfile;
     const char *path_prefix;
     const char *rewrite_file;
     const char *map_test_file;

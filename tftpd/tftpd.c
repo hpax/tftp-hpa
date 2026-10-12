@@ -435,6 +435,7 @@ enum long_only_options {
     OPT_SYSLOG,
     OPT_STDERR,
     OPT_STDOUT,
+    OPT_LOGFILE,
     OPT_MAP_TEST,
     OPT_MAP_STEPS,
     OPT_SYSTEMD,
@@ -484,6 +485,7 @@ static const struct option long_options[] = {
     { "syslog",      0, NULL, OPT_SYSLOG },
     { "stderr",      2, NULL, OPT_STDERR },
     { "stdout",      2, NULL, OPT_STDOUT },
+    { "logfile",     1, NULL, OPT_LOGFILE },
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { "normalize",   2, NULL, OPT_NORMALIZE },
@@ -739,6 +741,14 @@ int main(int argc, char **argv)
         case OPT_STDOUT:
             dopt.log_type = LOG_STDOUT;
             goto log_arg;
+        case OPT_LOGFILE:
+            if (!*optarg) {
+                tftpd_log(LOG_ERR, "Missing log file name");
+                exit(EX_USAGE);
+            }
+            dopt.log_type = LOG_FILE;
+            dopt.logfile = optarg;
+            break;
         log_arg:
             dopt.log_tagged =
                 optarg &&
@@ -1069,6 +1079,7 @@ int main(int argc, char **argv)
 
         if (reload_signal) {
             reload_signal = 0;
+            tftpd_rotatelog();
 #ifdef WITH_REGEX
             if (dopt.rewrite_file) {
                 freerules(rewrite_rules);
