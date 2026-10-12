@@ -11,6 +11,7 @@ AC_INIT
 AC_CONFIG_SRCDIR([MRULES])
 AC_PREFIX_DEFAULT([/usr])
 AC_CONFIG_AUX_DIR([autoconf/helpers])
+AC_CONFIG_MACRO_DIRS([autoconf/m4])
 
 dnl This prevents us from running Wine and thinking we are not
 dnl cross-compiling when in fact we are; running Wine here is at
