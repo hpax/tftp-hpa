@@ -77,10 +77,7 @@ uintmax_t parse_uint(const char *arg, uintmax_t lo, uintmax_t hi)
 
 bool parse_blocksize_arg(const char *str, unsigned int minimum)
 {
-    char *vp;
-    bool ok = false;
     uintmax_t v;
-    int blksize = 0;
 
     if (ascii_strncaseeq(str, "mtu", 3)) {
         switch (str[3]) {
