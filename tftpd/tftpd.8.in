@@ -420,7 +420,7 @@ and size the maximum block size accordingly. If
 is specified, the MTU value will be adjusted downward by
 .I slack
 bytes.
-.PP
+.IP
 Some embedded clients request large block sizes and yet do not handle
 fragmented packets correctly; for that reason
 \fB\-\-blocksize mtu\fP
@@ -457,15 +457,20 @@ and
 .I max-port
 values must be decimal numbers between 1 and 65535.
 .TP
-\fB\-\-stderr\fP[=\fBtag\fP]
-Send log messages to standard error instead of syslog. With the optional
-.B "=tag"
-suffix, add machine-readable priority tags.
+\fB\-\-syslog\fP
+Send log messages to syslog. This is the default.
 .TP
-\fB\-\-stdout\fP[=\fBtag\fP]
-Send log messages to standard output instead of syslog. With the optional
-.B "=tag"
-suffix, add machine-readable priority tags.
+\fB\-\-stderr\fP[=\fIformat\fP]
+Send log messages to standard error instead of syslog. The optional
+.RI  = format
+is shorthand for
+\[lq]\fB\-\-stderr\fP \fB\-\-logformat\fP \fIformat\fP\[rq].
+.TP
+\fB\-\-stdout\fP[=\fIformat\fP]
+Send log messages to standard output instead of syslog. The optional
+.RI  = format
+is shorthand for
+\[lq]\fB\-\-stdout\fP \fB\-\-logformat\fP \fIformat\fP\[rq].
 .TP
 \fB\-\-logfile\fP \fIfile\fP
 Send log messages to \fIfile\fP instead of syslog. The file is opened
@@ -474,8 +479,20 @@ for appending, and created with mode 0644 if it does not exist. If
 is running in standalone (listening) mode, the file will be closed and
 reopened if SIGHUP is received, to allow log file rotation.
 .TP
-\fB\-\-syslog\fP
-Send log messages to syslog. This is the default.
+\fB\-\-logformat\fP \fIformat\fP
+Set the log output format. The currently defined log formats are:
+.RS
+.TP
+\fBhuman\fP
+Use human-readable priority tags. This is the default.
+.TP
+\fBtag\fP
+Use machine-readable priority tags.
+.RE
+.IP
+Since syslog generates its own tags,
+.B \-\-logformat
+does not apply to syslog output.
 .TP
 \fB\-\-systemd\fP
 Use

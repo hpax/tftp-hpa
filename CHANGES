@@ -7,15 +7,17 @@ Changes in 7.3:
 
 	tftpd: add example configuration files for systemd activation.
 
-	tftpd: allow logging to stdout as well as stderr, and allow
-	logs to have standard machine-readable <#> priority level
-	prefixes.
-
-	tftpd: keep the executable suffix (e.g. ".exe") when running
-	"make install" on a platform which uses suffixed executables.
+	tftpd: allow logging to stdout as well as stderr.
 
 	tftpd: add --logfile option to send the log output to a
 	specific file.
+
+	tftpd: add --logformat option to allow logs sent to stdout,
+	stderr or a log file to have standard machine-readable <#>
+	priority level prefixes instead of human readable.
+
+	tftpd: keep the executable suffix (e.g. ".exe") when running
+	"make install" on a platform which uses suffixed executables.
 
 
 Changes in 7.2:

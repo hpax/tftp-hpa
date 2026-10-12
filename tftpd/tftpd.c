@@ -430,6 +430,39 @@ static enum normalizations parse_normalize(const char *str)
     exit(EX_USAGE);
 }
 
+static void parse_logformat(const char *fmt)
+{
+    if (!fmt)
+        return;                 /* --stdout or --stderr without argment */
+
+    switch (fmt[0]) {
+    case '\0':
+        tftpd_log(LOG_ERR, "missing log format");
+        exit(EX_USAGE);
+        break;
+
+    case 't':
+        if (!strcmp(fmt, "tag") || !strcmp(fmt, "tagged")) {
+            dopt.log_tagged = true;
+            return;
+        }
+        break;
+
+    case 'h':
+        if (!strcmp(fmt, "human")) {
+            dopt.log_tagged = false;
+            return;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    tftpd_log(LOG_ERR, "invalid log format: %s", fmt);
+    exit(EX_USAGE);
+}
+
 enum long_only_options {
     OPT_VERBOSITY	= 256,
     OPT_SYSLOG,
@@ -446,7 +479,8 @@ enum long_only_options {
     OPT_VALIDATE,
     OPT_READONLY,
     OPT_MAX_UPLOAD,
-    OPT_LOG
+    OPT_LOG,
+    OPT_LOGFORMAT
 };
 
 static const struct option long_options[] = {
@@ -486,6 +520,7 @@ static const struct option long_options[] = {
     { "stderr",      2, NULL, OPT_STDERR },
     { "stdout",      2, NULL, OPT_STDOUT },
     { "logfile",     1, NULL, OPT_LOGFILE },
+    { "logformat",   1, NULL, OPT_LOGFORMAT },
     { "map-test",    1, NULL, OPT_MAP_TEST },
     { "systemd",     0, NULL, OPT_SYSTEMD },
     { "normalize",   2, NULL, OPT_NORMALIZE },
@@ -737,10 +772,15 @@ int main(int argc, char **argv)
             break;
         case OPT_STDERR:
             dopt.log_type = LOG_STDERR;
-            goto log_arg;
+            parse_logformat(optarg);
+            break;
         case OPT_STDOUT:
             dopt.log_type = LOG_STDOUT;
-            goto log_arg;
+            parse_logformat(optarg);
+            break;
+        case OPT_LOGFORMAT:
+            parse_logformat(optarg);
+            break;
         case OPT_LOGFILE:
             if (!*optarg) {
                 tftpd_log(LOG_ERR, "Missing log file name");
@@ -748,12 +788,6 @@ int main(int argc, char **argv)
             }
             dopt.log_type = LOG_FILE;
             dopt.logfile = optarg;
-            break;
-        log_arg:
-            dopt.log_tagged =
-                optarg &&
-                (ascii_strcaseeq(optarg, "tag") ||
-                 ascii_strcaseeq(optarg, "tagged"));
             break;
         case OPT_SYSTEMD:
             dopt.nodaemon = true;
