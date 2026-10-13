@@ -448,7 +448,7 @@ int tftp_recvfile(int fd, const char *name, const char *mode)
     bool convert = !strcmp(mode, "netascii");
     struct optreq optreq, optack;
     uint16_t opcode;
-    unsigned long r_timeout;
+    uintmax_t r_timeout;
     volatile uintmax_t amount = 0;
 
     optreq_init(&optreq);
